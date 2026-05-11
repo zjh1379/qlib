@@ -186,7 +186,7 @@ Expected: succeeds; lists installed packages. If conflicts, the existing qlib en
 - [ ] **Step 5: Smoke test — can we import the package?**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -c "import app; print('ok')"
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -c "import app; print('ok')"
 ```
 
 Expected: prints `ok`.
@@ -241,7 +241,7 @@ Create `backend/app/core/tests/__init__.py` empty.
 - [ ] **Step 2: Run test, verify fail**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/core/tests/test_config.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/core/tests/test_config.py -v
 ```
 
 Expected: `ModuleNotFoundError: No module named 'app.core.config'`.
@@ -289,7 +289,7 @@ class Settings(BaseSettings):
 - [ ] **Step 4: Verify tests pass**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/core/tests/test_config.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/core/tests/test_config.py -v
 ```
 
 Expected: 3 passed.
@@ -345,7 +345,7 @@ def test_root_logger_respects_level():
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/core/tests/test_logging.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/core/tests/test_logging.py -v
 ```
 
 Expected: `ImportError`.
@@ -396,7 +396,7 @@ def get_logger(name: str = "app") -> structlog.stdlib.BoundLogger:
 - [ ] **Step 4: Verify pass**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/core/tests/test_logging.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/core/tests/test_logging.py -v
 ```
 
 Expected: 3 passed.
@@ -459,7 +459,7 @@ def test_dict_payload():
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/core/tests/test_exceptions.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/core/tests/test_exceptions.py -v
 ```
 
 Expected: `ImportError`.
@@ -502,7 +502,7 @@ class DependencyError(BusinessError):
 - [ ] **Step 4: Verify pass**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/core/tests/test_exceptions.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/core/tests/test_exceptions.py -v
 ```
 
 Expected: 5 passed.
@@ -555,7 +555,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/core/tests/test_db.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/core/tests/test_db.py -v
 ```
 
 Expected: ImportError.
@@ -617,7 +617,7 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 - [ ] **Step 4: Verify pass**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/core/tests/test_db.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/core/tests/test_db.py -v
 ```
 
 Expected: 1 passed.
@@ -642,7 +642,7 @@ git commit -m "feat(core): async SQLAlchemy session factory + singletons"
 - [ ] **Step 1: Initialize alembic (manual, since `alembic init` writes a default we then overwrite)**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m alembic init alembic
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m alembic init alembic
 ```
 
 This creates `alembic.ini` and `alembic/` directory. We will overwrite `env.py` next.
@@ -776,7 +776,7 @@ def downgrade() -> None:
 - [ ] **Step 5: Verify migration runs against a fresh SQLite**
 
 ```bash
-cd backend && rm -f app.db && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m alembic upgrade head
+cd backend && rm -f app.db && F:/Tools/Anaconda/envs/qlib/python.exe -m alembic upgrade head
 ```
 
 Expected: output ends with `Running upgrade  -> 0001, init`. A `backend/app.db` file appears.
@@ -784,7 +784,7 @@ Expected: output ends with `Running upgrade  -> 0001, init`. A `backend/app.db` 
 - [ ] **Step 6: Verify `alembic current` reports correct revision**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m alembic current
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m alembic current
 ```
 
 Expected: `0001 (head)`.
@@ -860,7 +860,7 @@ def test_init_is_idempotent():
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/core/tests/test_qlib_adapter.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/core/tests/test_qlib_adapter.py -v
 ```
 
 Expected: ImportError.
@@ -981,7 +981,7 @@ def load_pred(recorder_id: str, experiment_name: str = "daily_cn_fresh") -> pd.S
 - [ ] **Step 4: Verify pass**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/core/tests/test_qlib_adapter.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/core/tests/test_qlib_adapter.py -v
 ```
 
 Expected: 5 passed. (Requires existing `~/.qlib/qlib_data/cn_data_bs` + `daily_cn_fresh` experiment in `examples/mlruns`. These exist from prior work.)
@@ -1035,7 +1035,7 @@ def test_chart_payload_assembles():
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/charts/tests/test_schemas.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/charts/tests/test_schemas.py -v
 ```
 
 Expected: ImportError.
@@ -1089,7 +1089,7 @@ class ChartPayload(BaseModel):
 - [ ] **Step 4: Verify pass**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/charts/tests/test_schemas.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/charts/tests/test_schemas.py -v
 ```
 
 Expected: 3 passed.
@@ -1184,7 +1184,7 @@ def test_predicted_bar_open_equals_prior_actual_close():
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/charts/tests/test_service.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/charts/tests/test_service.py -v
 ```
 
 Expected: ImportError.
@@ -1351,7 +1351,7 @@ def get_chart(
 - [ ] **Step 4: Verify pass**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/charts/tests/test_service.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/charts/tests/test_service.py -v
 ```
 
 Expected: 4 passed.
@@ -1430,7 +1430,7 @@ async def test_get_chart_unknown_symbol_404(client):
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/charts/tests/test_router.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/charts/tests/test_router.py -v
 ```
 
 Expected: `ImportError: app.charts.router` (we haven't written it yet).
@@ -1461,7 +1461,7 @@ async def chart(
 - [ ] **Step 4: Verify pass**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/charts/tests/test_router.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/charts/tests/test_router.py -v
 ```
 
 Expected: 2 passed.
@@ -1520,7 +1520,7 @@ async def test_health_ok(client):
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/ops/tests/test_router.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/ops/tests/test_router.py -v
 ```
 
 Expected: ImportError.
@@ -1574,7 +1574,7 @@ async def health() -> HealthResponse:
 - [ ] **Step 4: Verify pass**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest app/ops/tests/test_router.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/ops/tests/test_router.py -v
 ```
 
 Expected: 1 passed.
@@ -1643,7 +1643,7 @@ async def test_business_error_returns_proper_status(client):
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest tests/integration/test_app_boot.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest tests/integration/test_app_boot.py -v
 ```
 
 Expected: ImportError.
@@ -1719,7 +1719,7 @@ app = create_app()
 - [ ] **Step 4: Verify pass**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest tests/integration/test_app_boot.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest tests/integration/test_app_boot.py -v
 ```
 
 Expected: 3 passed.
@@ -1727,7 +1727,7 @@ Expected: 3 passed.
 - [ ] **Step 5: Smoke-test the live server**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m uvicorn app.main:app --port 8000 &
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m uvicorn app.main:app --port 8000 &
 sleep 3
 curl -s http://localhost:8000/api/ops/health | head -c 200
 echo
@@ -1975,7 +1975,7 @@ cd frontend && npm install --save-dev openapi-typescript
 
 ```bash
 # Terminal 1
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m uvicorn app.main:app --port 8000 &
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m uvicorn app.main:app --port 8000 &
 sleep 4
 # Terminal 2 (same shell, since we backgrounded)
 cd frontend && npm run gen:api
@@ -2542,7 +2542,7 @@ Expected: clean.
 
 ```bash
 # Terminal 1
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m uvicorn app.main:app --port 8000 &
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m uvicorn app.main:app --port 8000 &
 # Terminal 2
 cd frontend && npm run dev &
 sleep 5
@@ -2581,7 +2581,7 @@ Expected: `frontend/dist/` contains `index.html` + `assets/` directory.
 - [ ] **Step 2: Start backend in production mode (no dev proxy)**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m uvicorn app.main:app --port 8000 &
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m uvicorn app.main:app --port 8000 &
 sleep 3
 ```
 
@@ -2692,7 +2692,7 @@ async def test_chart_alignment_invariant(client):
 - [ ] **Step 2: Run**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest tests/integration/test_chart_e2e.py -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest tests/integration/test_chart_e2e.py -v
 ```
 
 Expected: 2 passed (plus the 3 from T11). Total in this file: 5 passed.
@@ -2700,7 +2700,7 @@ Expected: 2 passed (plus the 3 from T11). Total in this file: 5 passed.
 - [ ] **Step 3: Run the entire test suite to catch regressions**
 
 ```bash
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest -v
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest -v
 ```
 
 Expected: all green. Total ~20-25 tests.
@@ -2738,7 +2738,7 @@ F:/Tools/Anaconda/envs/qlib/Scripts/pip.exe install -e '.[dev]'
 ## Run
 
 ```bash
-F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000
+F:/Tools/Anaconda/envs/qlib/python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
 Open <http://localhost:8000/docs> for the API browser.
@@ -2746,13 +2746,13 @@ Open <http://localhost:8000/docs> for the API browser.
 ## Test
 
 ```bash
-F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest -v
+F:/Tools/Anaconda/envs/qlib/python.exe -m pytest -v
 ```
 
 ## Migrations
 
 ```bash
-F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m alembic upgrade head
+F:/Tools/Anaconda/envs/qlib/python.exe -m alembic upgrade head
 ```
 
 ## Module layout
@@ -2817,7 +2817,7 @@ Quick start (after running `update_qlib_data.ps1` once to seed data):
 
 ```bash
 # Backend
-cd backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m uvicorn app.main:app --port 8000
+cd backend && F:/Tools/Anaconda/envs/qlib/python.exe -m uvicorn app.main:app --port 8000
 
 # Frontend (in another terminal)
 cd frontend && npm install && npm run dev
@@ -2845,7 +2845,7 @@ This is the final "v1 of P1 done" gate. No new code; runs everything to confirm.
 
 ```bash
 # Backend
-cd backend && rm -f app.db && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m alembic upgrade head
+cd backend && rm -f app.db && F:/Tools/Anaconda/envs/qlib/python.exe -m alembic upgrade head
 
 # Frontend
 cd ../frontend && rm -rf dist node_modules && npm install && npm run build
@@ -2856,7 +2856,7 @@ Expected: both succeed without warnings.
 - [ ] **Step 2: Run all backend tests**
 
 ```bash
-cd ../backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m pytest -v --tb=short
+cd ../backend && F:/Tools/Anaconda/envs/qlib/python.exe -m pytest -v --tb=short
 ```
 
 Expected: all green; ~25 tests.
@@ -2872,7 +2872,7 @@ Expected: all green.
 - [ ] **Step 4: Manual smoke (single integrated server)**
 
 ```bash
-cd ../backend && F:/Tools/Anaconda/envs/qlib/Scripts/python.exe -m uvicorn app.main:app --port 8000 &
+cd ../backend && F:/Tools/Anaconda/envs/qlib/python.exe -m uvicorn app.main:app --port 8000 &
 sleep 4
 curl -s http://localhost:8000/api/ops/health
 # browser: open http://localhost:8000/charts/SH600519
