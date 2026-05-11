@@ -64,3 +64,23 @@ def test_predicted_bar_open_equals_prior_actual_close():
         assert abs(pred_bar.open - prior_actual.close) < 1e-6, (
             f"pred[{pred_bar.time}].open should equal actual[{actual_times[idx-1]}].close"
         )
+
+
+def test_forecast_bars_chain_correctly():
+    """forecast[0].open == actual[-1].close, forecast[1].open == forecast[0].close (chained)."""
+    end = get_calendar_end()
+    payload = get_chart(
+        symbol="SH600519",
+        start="2025-04-01",
+        end=str(end),
+        with_pred=True,
+        experiment="daily_cn_fresh",
+    )
+    if len(payload.forecast) < 1:
+        pytest.skip("no forecast bars produced — score may be missing for last signal date")
+    last_actual_close = payload.actual[-1].close
+    assert abs(payload.forecast[0].open - last_actual_close) < 1e-6, \
+        f"forecast[0].open should equal last actual close"
+    if len(payload.forecast) >= 2:
+        assert abs(payload.forecast[1].open - payload.forecast[0].close) < 1e-6, \
+            f"forecast[1].open should equal forecast[0].close (chained prediction)"

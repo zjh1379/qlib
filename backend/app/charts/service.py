@@ -9,6 +9,7 @@ from app.core.qlib_adapter import (
     get_ohlcv,
     init_qlib_once,
     load_pred,
+    next_trading_days,
 )
 
 
@@ -110,12 +111,7 @@ def get_chart(
             calendar_end = get_calendar_end()
             last_actual_date = pd.Timestamp(actual[-1].time)
             # naive future calendar using qlib's trading calendar for next 5 business days
-            from qlib.data import D
-            future_cal = [
-                pd.Timestamp(d)
-                for d in D.calendar(start_time=last_actual_date, end_time=last_actual_date + pd.Timedelta(days=10))
-                if pd.Timestamp(d) > last_actual_date
-            ][:2]
+            future_cal = next_trading_days(last_actual_date, n=2)
             if len(future_cal) >= 1 and len(actual) >= 2:
                 sig_date_for_f1 = actual_dates[-2]
                 if sig_date_for_f1 in score_map:

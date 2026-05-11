@@ -88,6 +88,14 @@ def get_calendar_end() -> date:
     return pd.Timestamp(cal[-1]).date()
 
 
+def next_trading_days(after: str | pd.Timestamp, n: int = 2) -> list[pd.Timestamp]:
+    """Return up to `n` trading days strictly after `after` (a date string or Timestamp)."""
+    init_qlib_once()
+    anchor = pd.Timestamp(after)
+    cal = D.calendar(start_time=anchor, end_time=anchor + pd.Timedelta(days=10 + n * 3))
+    return [pd.Timestamp(d) for d in cal if pd.Timestamp(d) > anchor][:n]
+
+
 def get_csi300_instruments() -> list[str]:
     init_qlib_once()
     inst_dict = D.instruments("csi300")

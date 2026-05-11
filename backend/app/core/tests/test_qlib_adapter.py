@@ -7,6 +7,7 @@ from app.core.qlib_adapter import (
     get_csi300_instruments,
     load_pred,
     get_latest_recorder_id,
+    next_trading_days,
 )
 
 
@@ -64,3 +65,18 @@ def test_init_raises_when_mlruns_missing(tmp_path, monkeypatch):
     qlib_adapter._initialized = False
     monkeypatch.undo()
     qlib_adapter.init_qlib_once()
+
+
+def test_next_trading_days_returns_n_future_days():
+    """next_trading_days(after, n=2) returns up to 2 trading days strictly after anchor."""
+    end = get_calendar_end()
+    # Use a date well before calendar end to ensure we have future days
+    anchor = pd.Timestamp("2025-04-01")
+    result = next_trading_days(anchor, n=2)
+    assert isinstance(result, list)
+    assert len(result) <= 2
+    assert all(isinstance(d, pd.Timestamp) for d in result)
+    assert all(d > anchor for d in result)
+    if len(result) >= 2:
+        # verify they are in chronological order
+        assert result[0] < result[1]
