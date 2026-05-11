@@ -53,3 +53,22 @@ tags
 .aider*
 
 .superpowers/
+
+# Backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.egg-info/
+backend/.pytest_cache/
+backend/.coverage
+backend/app.db
+backend/app.db-journal
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# Generated API types (kept in source for clarity, regenerated on schema change)
+!frontend/src/api/types.gen.ts
