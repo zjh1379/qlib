@@ -1,24 +1,26 @@
 from fastapi import APIRouter
 
-from app.core.qlib_adapter import _initialized as _qlib_initialized_flag  # noqa: F401
+from app.core.qlib_adapter import get_calendar_end, init_qlib_once
+from app.ops.schemas import HealthResponse
 
 router = APIRouter()
 
+APP_VERSION = "0.1.0"
 
-@router.get("/health")
-async def health() -> dict:
-    from app.core import qlib_adapter
 
-    qlib_ready = bool(qlib_adapter._initialized)
-    calendar_end: str | None = None
-    if qlib_ready:
-        try:
-            calendar_end = qlib_adapter.get_calendar_end().isoformat()
-        except Exception:
-            calendar_end = None
-    return {
-        "status": "ok",
-        "version": "0.1.0",
-        "qlib_ready": qlib_ready,
-        "calendar_end": calendar_end,
-    }
+@router.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    qlib_ready = False
+    cal_end = None
+    try:
+        init_qlib_once()
+        cal_end = str(get_calendar_end())
+        qlib_ready = True
+    except Exception:
+        pass
+    return HealthResponse(
+        status="ok",
+        version=APP_VERSION,
+        qlib_ready=qlib_ready,
+        calendar_end=cal_end,
+    )
