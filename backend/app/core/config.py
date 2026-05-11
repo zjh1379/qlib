@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     qlib_provider_uri: str = "~/.qlib/qlib_data/cn_data_bs"
     qlib_region: str = "cn"
     mlruns_dir: str = "examples/mlruns"
-    app_db_path: str = "backend/app.db"
+    app_db_path: str = "app.db"
 
     # Defaults
     default_experiment: str = "daily_cn_fresh"
