@@ -45,3 +45,22 @@ def test_load_pred_returns_series():
 def test_init_is_idempotent():
     init_qlib_once()
     init_qlib_once()  # second call should be a no-op, not raise
+
+
+def test_init_raises_when_mlruns_missing(tmp_path, monkeypatch):
+    """init_qlib_once must raise DependencyError(mlruns_missing) when mlruns dir doesn't exist."""
+    from app.core import qlib_adapter
+    from app.core.exceptions import DependencyError
+
+    # reset module-level init flag so we can re-init
+    qlib_adapter._initialized = False
+
+    monkeypatch.setenv("QLIB_COMPANION_MLRUNS_DIR", str(tmp_path / "does_not_exist"))
+    with pytest.raises(DependencyError) as excinfo:
+        qlib_adapter.init_qlib_once()
+    assert excinfo.value.code == "mlruns_missing"
+
+    # restore for downstream tests
+    qlib_adapter._initialized = False
+    monkeypatch.undo()
+    qlib_adapter.init_qlib_once()

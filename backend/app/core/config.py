@@ -32,3 +32,16 @@ class Settings(BaseSettings):
     @property
     def qlib_data_dir(self) -> Path:
         return Path(self.qlib_provider_uri).expanduser().resolve()
+
+    @property
+    def mlruns_path(self) -> Path:
+        """Resolve mlruns_dir against the project root (3 levels up from this file:
+        config.py -> core/ -> app/ -> backend/ -> <repo root>).
+        If mlruns_dir is absolute, use it as-is.
+        """
+        p = Path(self.mlruns_dir).expanduser()
+        if p.is_absolute():
+            return p.resolve()
+        # config.py is at backend/app/core/config.py -> parents[3] is the worktree root
+        project_root = Path(__file__).resolve().parents[3]
+        return (project_root / p).resolve()

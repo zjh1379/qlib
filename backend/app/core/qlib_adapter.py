@@ -18,28 +18,15 @@ _lock = Lock()
 
 
 def _resolve_mlruns_uri(settings: Settings) -> str:
-    """Resolve mlruns_dir to an absolute file: URI.
-
-    Settings.mlruns_dir defaults to ``examples/mlruns`` (repo-root relative).
-    When the backend is run with cwd=backend/, we walk up one level to find it.
-    Falls back to cwd-relative if the parent path doesn't exist.
-    """
-    candidate = Path(settings.mlruns_dir).expanduser()
-    if not candidate.is_absolute():
-        # Try cwd first
-        cwd_candidate = (Path.cwd() / candidate).resolve()
-        if cwd_candidate.is_dir():
-            candidate = cwd_candidate
-        else:
-            # Try one level up (backend/ -> repo root)
-            parent_candidate = (Path.cwd().parent / settings.mlruns_dir).resolve()
-            if parent_candidate.is_dir():
-                candidate = parent_candidate
-            else:
-                candidate = cwd_candidate
-    else:
-        candidate = candidate.resolve()
-    return f"file:{candidate}"
+    """Return a file:// URI for the mlruns directory. Raises DependencyError if missing."""
+    path = settings.mlruns_path
+    if not path.is_dir():
+        raise DependencyError(
+            f"mlruns directory not found at {path}",
+            code="mlruns_missing",
+            context={"path": str(path)},
+        )
+    return f"file:{path}"
 
 
 def init_qlib_once(settings: Settings | None = None) -> None:
