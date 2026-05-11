@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.charts.router import router as charts_router
@@ -54,7 +54,18 @@ def create_app() -> FastAPI:
     # Static serving of the built frontend (created in T18; tolerated if missing)
     static_dir = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
     if static_dir.is_dir():
-        app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
+        # Mount assets directory
+        assets_dir = static_dir / "assets"
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+        # SPA catch-all: serve index.html for all unmapped routes (enables client-side routing)
+        index_html = static_dir / "index.html"
+
+        @app.get("/{full_path:path}")
+        async def serve_spa(full_path: str):
+            # Return index.html for SPA routing
+            return FileResponse(str(index_html), media_type="text/html")
 
     return app
 
