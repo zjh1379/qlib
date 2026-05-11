@@ -35,10 +35,11 @@ def init_db_singletons(settings: Settings) -> None:
 
 
 async def dispose_db_singletons() -> None:
-    global _engine
+    global _engine, _session_maker
     if _engine is not None:
         await _engine.dispose()
         _engine = None
+        _session_maker = None
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

@@ -13,3 +13,23 @@ async def test_session_factory_yields_working_session(tmp_path, monkeypatch):
         result = await session.execute(text("SELECT 1"))
         assert result.scalar() == 1
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_get_session_raises_after_dispose(tmp_path, monkeypatch):
+    monkeypatch.setenv("QLIB_COMPANION_APP_DB_PATH", str(tmp_path / "x.db"))
+    from app.core.db import init_db_singletons, dispose_db_singletons, get_session
+    from app.core.config import Settings
+
+    init_db_singletons(Settings())
+    # sanity: a session can be acquired
+    gen = get_session()
+    sess = await gen.__anext__()
+    await sess.close()
+    await gen.aclose()
+
+    # now dispose and verify get_session raises
+    await dispose_db_singletons()
+    with pytest.raises(RuntimeError, match="not initialized"):
+        async for _ in get_session():
+            pass
