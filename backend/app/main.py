@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -64,6 +64,14 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str):
+            # Guard: 404 on API/docs paths that should never hit SPA fallback
+            if (
+                full_path.startswith("api/")
+                or full_path.startswith("docs")
+                or full_path.startswith("redoc")
+                or full_path == "openapi.json"
+            ):
+                raise HTTPException(status_code=404, detail="Not Found")
             # Return index.html for SPA routing
             return FileResponse(str(index_html), media_type="text/html")
 

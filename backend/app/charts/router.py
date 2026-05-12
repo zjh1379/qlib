@@ -7,7 +7,7 @@ router = APIRouter()
 
 
 @router.get("/{symbol}", response_model=ChartPayload)
-async def chart(
+def chart(
     symbol: str,
     start: str = Query(..., description="ISO date YYYY-MM-DD"),
     end: str = Query(..., description="ISO date YYYY-MM-DD"),
