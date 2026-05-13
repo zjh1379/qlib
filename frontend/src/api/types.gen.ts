@@ -252,6 +252,30 @@ export interface components {
             /** Score */
             score: number;
         };
+        /** ProgressInfo */
+        ProgressInfo: {
+            /**
+             * Phase
+             * @description One of "init" | "fetch" | "dump" | "benchmark" | "done" (or future phases)
+             */
+            phase: string;
+            /**
+             * Current
+             * @description Current step (0-indexed start, total when finished)
+             */
+            current: number;
+            /**
+             * Total
+             * @description Total steps for this phase
+             */
+            total: number;
+            /**
+             * Message
+             * @description Human-readable status line for this step
+             * @default
+             */
+            message: string;
+        };
         /** RefreshJobStatus */
         RefreshJobStatus: {
             /** Job Id */
@@ -267,6 +291,8 @@ export interface components {
             finished_at?: string | null;
             /** Log Tail */
             log_tail?: string | null;
+            /** @description Latest structured progress emitted by the refresh script, if any. */
+            progress?: components["schemas"]["ProgressInfo"] | null;
         };
         /** RefreshResponse */
         RefreshResponse: {

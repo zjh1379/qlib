@@ -85,13 +85,20 @@ export default function Dashboard() {
               'disabled:bg-[#30363d] disabled:text-[#6e7681] disabled:cursor-not-allowed',
             )}
           >
-            {jobStatus?.status === 'running' ? '正在刷新…' : '刷新数据'}
+            {jobStatus?.status === 'running' ? '正在刷新…' : '刷新数据 (增量)'}
           </button>
           {refreshMut.isError && (
             <span className="text-sm text-red-400">{(refreshMut.error as Error).message}</span>
           )}
-          {jobStatus?.status === 'succeeded' && (
-            <span className="text-sm text-green-400">✓ 完成</span>
+          {jobStatus?.status === 'done' && (
+            <span className="text-sm text-green-400">
+              ✓ 完成
+              {status?.last_refresh_at && (
+                <span className="ml-2 text-[#6e7681]">
+                  · 数据更新于 {new Date(status.last_refresh_at).toLocaleString('zh-CN')}
+                </span>
+              )}
+            </span>
           )}
           {jobStatus?.status === 'failed' && (
             <span className="text-sm text-red-400">✗ 失败 — 查看日志</span>
@@ -100,13 +107,51 @@ export default function Dashboard() {
             <span className="text-xs text-[#6e7681] font-mono">job: {jobId.slice(0, 8)}…</span>
           )}
         </div>
-        {jobStatus?.log_tail && (jobStatus.status === 'failed' || jobStatus.status === 'running') && (
-          <pre className="mt-3 text-xs text-[#8b949e] bg-[#161b22] p-2 rounded max-h-32 overflow-y-auto whitespace-pre-wrap">
-            {jobStatus.log_tail.split('\n').slice(-10).join('\n')}
+
+        {/* Running: show structured progress bar */}
+        {jobStatus && jobStatus.status === 'running' && (
+          <div className="mt-3 space-y-2">
+            {jobStatus.progress ? (
+              <div>
+                <div className="flex justify-between text-xs text-[#8b949e] mb-1 gap-2">
+                  <span className="flex items-center min-w-0">
+                    <PhaseBadge phase={jobStatus.progress.phase} />
+                    {jobStatus.progress.message && (
+                      <span className="ml-2 truncate">{jobStatus.progress.message}</span>
+                    )}
+                  </span>
+                  <span className="font-mono whitespace-nowrap">
+                    {jobStatus.progress.current}/{jobStatus.progress.total}
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-[#21262d] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#1f6feb] transition-all"
+                    style={{
+                      width: `${
+                        jobStatus.progress.total > 0
+                          ? Math.min(100, (jobStatus.progress.current / jobStatus.progress.total) * 100)
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-[#8b949e]">初始化中…</div>
+            )}
+          </div>
+        )}
+
+        {/* Failed: show log tail so the user can see what broke */}
+        {jobStatus?.status === 'failed' && jobStatus.log_tail && (
+          <pre className="mt-3 text-xs text-[#8b949e] bg-[#161b22] p-2 rounded max-h-40 overflow-y-auto whitespace-pre-wrap">
+            {jobStatus.log_tail.split('\n').slice(-12).join('\n')}
           </pre>
         )}
+
         <p className="text-xs text-[#6e7681] mt-2">
-          刷新会调用 baostock 拉取 CSI300 最新 OHLCV + dump_bin 重建二进制数据，约 7 分钟。
+          仅抓取本地 CSV 缺失的日期 (incremental)，并通过 dump_bin dump_update 追加到 qlib 二进制目录。如本地已最新，通常 1–2 分钟即可完成。
         </p>
       </div>
 
@@ -160,5 +205,21 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
       <div className="text-xs text-[#6e7681] uppercase tracking-wider">{label}</div>
       <div className="text-base mt-1">{value}</div>
     </div>
+  );
+}
+
+const PHASE_LABEL: Record<string, string> = {
+  init: '初始化',
+  fetch: '增量抓取',
+  dump: 'dump_bin',
+  benchmark: '基准',
+  done: '完成',
+};
+
+function PhaseBadge({ phase }: { phase: string }) {
+  return (
+    <span className="inline-block px-2 py-0.5 rounded text-xs bg-[#1f6feb] text-white font-medium whitespace-nowrap">
+      {PHASE_LABEL[phase] ?? phase}
+    </span>
   );
 }

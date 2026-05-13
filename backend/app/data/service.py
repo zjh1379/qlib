@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import shutil
+import json as _json
 import subprocess
+import sys as _sys
 import threading
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from app.data.schemas import (
     DataStatus,
     InstrumentItem,
     InstrumentsResponse,
+    ProgressInfo,
     RefreshJobStatus,
     RefreshResponse,
 )
@@ -145,22 +147,14 @@ def start_refresh() -> RefreshResponse:
         job_id = uuid.uuid4().hex
         started_at = datetime.now(timezone.utc).isoformat()
         root = _worktree_root()
-        script = root / "update_qlib_data.ps1"
+        script = root / "production" / "incremental_refresh.py"
         logs_dir = root / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         log_path = logs_dir / f"api_refresh_{job_id}.log"
 
-        powershell = shutil.which("powershell") or "powershell.exe"
         log_fh = open(log_path, "wb")
         proc = subprocess.Popen(
-            [
-                powershell,
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(script),
-            ],
+            [_sys.executable, str(script)],
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             cwd=str(root),
@@ -222,6 +216,40 @@ def _tail_log(log_path: Path, n_lines: int = 50) -> str | None:
         return None
 
 
+def _latest_progress(log_path: Path) -> ProgressInfo | None:
+    """Parse the latest PROGRESS line from the log.
+
+    The Python script emits lines like:
+        PROGRESS {"phase":"fetch","current":42,"total":300,"message":"..."}
+
+    Returns None if the log is missing, unreadable, or contains no parseable
+    PROGRESS line.
+    """
+    if not log_path.is_file():
+        return None
+    try:
+        with log_path.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            read_size = min(size, 32 * 1024)
+            f.seek(size - read_size)
+            data = f.read()
+        text = data.decode("utf-8", errors="replace")
+        # Iterate lines from end; find the latest valid "PROGRESS {...}"
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if not line.startswith("PROGRESS "):
+                continue
+            try:
+                payload = _json.loads(line[len("PROGRESS "):])
+                return ProgressInfo(**payload)
+            except Exception:
+                continue
+        return None
+    except Exception:
+        return None
+
+
 def get_refresh_status(job_id: str) -> RefreshJobStatus:
     entry = _refresh_jobs.get(job_id)
     if entry is None:
@@ -237,4 +265,5 @@ def get_refresh_status(job_id: str) -> RefreshJobStatus:
         started_at=entry["started_at"],
         finished_at=entry.get("finished_at"),
         log_tail=_tail_log(log_path),
+        progress=_latest_progress(log_path),
     )

@@ -71,7 +71,7 @@ async def test_instruments_unknown_market_400(client):
 
 @pytest.mark.asyncio
 async def test_refresh_starts_job(client):
-    """Mock subprocess.Popen so we never actually launch PowerShell."""
+    """Mock subprocess.Popen so we never actually launch the Python refresh script."""
     # Reset module state to avoid contention with other tests
     from app.data import service as data_service
 
@@ -96,18 +96,13 @@ async def test_refresh_starts_job(client):
         assert "started_at" in body
         assert "message" in body
 
-        # Verify Popen was called with the expected PowerShell args
+        # Verify Popen was called: [<python>, <path_to>/production/incremental_refresh.py]
         assert mock_popen.called
         call_args, call_kwargs = mock_popen.call_args
         cmd = call_args[0]
-        # First arg is powershell binary, then -NoProfile, -ExecutionPolicy Bypass, -File <script>
-        assert "-NoProfile" in cmd
-        assert "-ExecutionPolicy" in cmd
-        assert "Bypass" in cmd
-        assert "-File" in cmd
-        # The script path should end with update_qlib_data.ps1
-        script_idx = cmd.index("-File") + 1
-        assert cmd[script_idx].endswith("update_qlib_data.ps1")
+        assert len(cmd) == 2
+        # second arg is the script path
+        assert cmd[1].replace("\\", "/").endswith("production/incremental_refresh.py")
 
     # Allow the background thread to finish so subsequent tests can acquire the lock
     import time

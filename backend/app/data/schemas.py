@@ -1,6 +1,16 @@
 from pydantic import BaseModel, Field
 
 
+class ProgressInfo(BaseModel):
+    phase: str = Field(
+        ...,
+        description='One of "init" | "fetch" | "dump" | "benchmark" | "done" (or future phases)',
+    )
+    current: int = Field(..., description="Current step (0-indexed start, total when finished)")
+    total: int = Field(..., description="Total steps for this phase")
+    message: str = Field("", description="Human-readable status line for this step")
+
+
 class DataStatus(BaseModel):
     calendar_end: str = Field(..., description="ISO date YYYY-MM-DD of the last trading day")
     calendar_size: int = Field(..., description="Number of trading days in the calendar")
@@ -36,3 +46,7 @@ class RefreshJobStatus(BaseModel):
     started_at: str
     finished_at: str | None = None
     log_tail: str | None = None
+    progress: ProgressInfo | None = Field(
+        None,
+        description="Latest structured progress emitted by the refresh script, if any.",
+    )
