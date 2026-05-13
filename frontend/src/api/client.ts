@@ -52,4 +52,23 @@ export const api = {
       return request<R>('/api/ops/health');
     },
   },
+  data: {
+    status: () => {
+      type R = paths['/api/data/status']['get']['responses']['200']['content']['application/json'];
+      return request<R>('/api/data/status');
+    },
+    refresh: () => {
+      type R = paths['/api/data/refresh']['post']['responses']['200']['content']['application/json'];
+      return request<R>('/api/data/refresh', { method: 'POST' });
+    },
+    refreshStatus: (jobId: string) => {
+      type R =
+        paths['/api/data/refresh/{job_id}']['get']['responses']['200']['content']['application/json'];
+      return request<R>(`/api/data/refresh/${encodeURIComponent(jobId)}`);
+    },
+  },
+  instruments: (market = 'csi300') => {
+    type R = paths['/api/instruments']['get']['responses']['200']['content']['application/json'];
+    return request<R>(`/api/instruments?market=${encodeURIComponent(market)}`);
+  },
 };

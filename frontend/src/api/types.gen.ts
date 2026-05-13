@@ -38,6 +38,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/data/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Data Status */
+        get: operations["data_status_api_data_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/data/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh */
+        post: operations["refresh_api_data_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/data/refresh/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Refresh Status */
+        get: operations["refresh_status_api_data_refresh__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/instruments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Instruments */
+        get: operations["instruments_api_instruments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/{full_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve Spa */
+        get: operations["serve_spa__full_path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -78,6 +163,34 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** DataStatus */
+        DataStatus: {
+            /**
+             * Calendar End
+             * @description ISO date YYYY-MM-DD of the last trading day
+             */
+            calendar_end: string;
+            /**
+             * Calendar Size
+             * @description Number of trading days in the calendar
+             */
+            calendar_size: number;
+            /**
+             * Instruments Count
+             * @description Number of symbols in csi300 (~300)
+             */
+            instruments_count: number;
+            /**
+             * Last Refresh At
+             * @description ISO UTC timestamp; mtime of calendars/day.txt
+             */
+            last_refresh_at?: string | null;
+            /**
+             * Freshness
+             * @description One of "fresh" | "stale_1d" | "stale_2d_plus"
+             */
+            freshness: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -93,6 +206,28 @@ export interface components {
             qlib_ready: boolean;
             /** Calendar End */
             calendar_end?: string | null;
+        };
+        /** InstrumentItem */
+        InstrumentItem: {
+            /**
+             * Symbol
+             * @description e.g. "SH600519"
+             */
+            symbol: string;
+            /**
+             * Name
+             * @description Chinese name, "" if unknown
+             */
+            name: string;
+        };
+        /** InstrumentsResponse */
+        InstrumentsResponse: {
+            /** Market */
+            market: string;
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["InstrumentItem"][];
         };
         /**
          * PredictionBar
@@ -116,6 +251,31 @@ export interface components {
             close: number;
             /** Score */
             score: number;
+        };
+        /** RefreshJobStatus */
+        RefreshJobStatus: {
+            /** Job Id */
+            job_id: string;
+            /**
+             * Status
+             * @description "running" | "done" | "failed"
+             */
+            status: string;
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Log Tail */
+            log_tail?: string | null;
+        };
+        /** RefreshResponse */
+        RefreshResponse: {
+            /** Job Id */
+            job_id: string;
+            /** Started At */
+            started_at: string;
+            /** Message */
+            message: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -193,6 +353,140 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    data_status_api_data_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataStatus"];
+                };
+            };
+        };
+    };
+    refresh_api_data_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshResponse"];
+                };
+            };
+        };
+    };
+    refresh_status_api_data_refresh__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshJobStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    instruments_api_instruments_get: {
+        parameters: {
+            query?: {
+                /** @description Market identifier, only csi300 supported */
+                market?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    serve_spa__full_path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                full_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

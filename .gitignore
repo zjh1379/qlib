@@ -72,3 +72,9 @@ frontend/coverage/
 
 # Generated API types (kept in source for clarity, regenerated on schema change)
 !frontend/src/api/types.gen.ts
+
+# Backend transient logs from local smoke tests / uvicorn runs
+backend/uvicorn*.log
+backend/pytest_output.log
+backend/uvicorn_*.log
+frontend/tsconfig.tsbuildinfo

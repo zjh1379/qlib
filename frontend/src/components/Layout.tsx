@@ -1,15 +1,20 @@
 import { Link, Outlet } from 'react-router-dom';
+import SymbolSearch from '@/components/SymbolSearch';
 import { cn } from '@/lib/utils';
 
 export default function Layout() {
   return (
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-[#30363d] px-6 py-3 flex items-center gap-6">
-        <span className="font-semibold">Qlib Companion</span>
-        <nav className="flex gap-4 text-sm">
+        <Link to="/" className="font-semibold whitespace-nowrap">
+          Qlib Companion
+        </Link>
+        <nav className="flex gap-4 text-sm flex-shrink-0">
           <NavLink to="/">Dashboard</NavLink>
-          <NavLink to="/charts/SH600519">Charts</NavLink>
         </nav>
+        <div className="flex-1 max-w-md ml-auto">
+          <SymbolSearch size="sm" placeholder="搜索股票…" />
+        </div>
       </header>
       <main className="flex-1 p-6">
         <Outlet />
