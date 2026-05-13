@@ -12,6 +12,8 @@ from app.core.db import dispose_db_singletons, init_db_singletons
 from app.core.exceptions import BusinessError
 from app.core.logging import configure_logging, get_logger
 from app.core.qlib_adapter import init_qlib_once
+from app.data.router import instruments_router as data_instruments_router
+from app.data.router import router as data_router
 from app.ops.router import router as ops_router
 
 
@@ -50,6 +52,8 @@ def create_app() -> FastAPI:
 
     app.include_router(charts_router, prefix="/api/charts", tags=["charts"])
     app.include_router(ops_router, prefix="/api/ops", tags=["ops"])
+    app.include_router(data_router, prefix="/api/data", tags=["data"])
+    app.include_router(data_instruments_router, prefix="/api", tags=["data"])
 
     # Static serving of the built frontend (created in T18; tolerated if missing)
     static_dir = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"

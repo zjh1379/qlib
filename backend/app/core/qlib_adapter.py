@@ -103,6 +103,34 @@ def get_csi300_instruments() -> list[str]:
     return sorted(inst_list)
 
 
+def get_calendar_info() -> tuple[date, int]:
+    """Return (last_trading_day, total_calendar_size) for the configured market."""
+    init_qlib_once()
+    cal = D.calendar(freq="day")
+    if not len(cal):
+        raise DependencyError("empty trading calendar", code="calendar_empty")
+    return pd.Timestamp(cal[-1]).date(), int(len(cal))
+
+
+def get_csi300_with_names() -> list[dict]:
+    """Returns [{symbol, name}] for CSI300 with Chinese names from production cache file."""
+    instruments = get_csi300_instruments()
+    cache_path = Path(__file__).resolve().parents[3] / "production" / "cn_names_cache.json"
+    name_map: dict[str, str] = {}
+    if cache_path.is_file():
+        try:
+            import json
+            data = json.loads(cache_path.read_text(encoding="utf-8"))
+            name_map = data.get("map", {}) or {}
+        except Exception:
+            name_map = {}
+    out: list[dict] = []
+    for sym in instruments:
+        code = sym[2:] if sym[:2] in {"SH", "SZ"} else sym
+        out.append({"symbol": sym, "name": name_map.get(code, "")})
+    return out
+
+
 def get_latest_recorder_id(experiment_name: str) -> str:
     init_qlib_once()
     try:

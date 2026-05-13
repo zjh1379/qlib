@@ -4,7 +4,9 @@ from app.core.qlib_adapter import (
     init_qlib_once,
     get_ohlcv,
     get_calendar_end,
+    get_calendar_info,
     get_csi300_instruments,
+    get_csi300_with_names,
     load_pred,
     get_latest_recorder_id,
     next_trading_days,
@@ -65,6 +67,21 @@ def test_init_raises_when_mlruns_missing(tmp_path, monkeypatch):
     qlib_adapter._initialized = False
     monkeypatch.undo()
     qlib_adapter.init_qlib_once()
+
+
+def test_get_calendar_info_returns_date_and_size():
+    end, size = get_calendar_info()
+    assert end.year >= 2025
+    assert size > 100
+
+
+def test_get_csi300_with_names_includes_known_symbol():
+    items = get_csi300_with_names()
+    assert isinstance(items, list)
+    assert len(items) >= 200
+    assert all(set(d.keys()) == {"symbol", "name"} for d in items)
+    # at least one well-known symbol should have a non-empty Chinese name
+    assert any(d["name"] for d in items)
 
 
 def test_next_trading_days_returns_n_future_days():
