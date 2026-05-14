@@ -72,4 +72,39 @@ describe('SymbolSearch', () => {
       expect(screen.getAllByText(/SH601398/).length).toBeGreaterThan(0);
     });
   });
+
+  it('infers SZ prefix for bare 6-digit ETF code (159995 -> SZ159995)', async () => {
+    render(wrap(<SymbolSearch />));
+    const input = screen.getByLabelText('symbol search');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '159995' } });
+    await waitFor(() => {
+      // candidate should be SZ159995 (15xxxx = 深市 ETF)
+      expect(screen.getByText(/SZ159995/)).toBeInTheDocument();
+      expect(screen.getByText(/到下载列表/)).toBeInTheDocument();
+      expect(screen.getByText(/推断自 159995/)).toBeInTheDocument();
+    });
+  });
+
+  it('infers SH prefix for bare 6-digit stock code (600519 -> SH600519, already in dataset)', async () => {
+    render(wrap(<SymbolSearch />));
+    const input = screen.getByLabelText('symbol search');
+    fireEvent.focus(input);
+    // 600519 matches the SH600519 item via includes-search, so it should appear as a result
+    fireEvent.change(input, { target: { value: '600519' } });
+    await waitFor(() => {
+      expect(screen.getByText(/SH600519/)).toBeInTheDocument();
+      expect(screen.getByText(/贵州茅台/)).toBeInTheDocument();
+    });
+  });
+
+  it('shows hint when input is not a valid symbol pattern', async () => {
+    render(wrap(<SymbolSearch />));
+    const input = screen.getByLabelText('symbol search');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'XX' } });
+    await waitFor(() => {
+      expect(screen.getByText(/输入 6 位代码/)).toBeInTheDocument();
+    });
+  });
 });
