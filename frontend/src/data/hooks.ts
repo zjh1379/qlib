@@ -37,3 +37,23 @@ export function useRefreshJob(jobId: string | null) {
       q.state.data?.status === 'running' ? 3_000 : false, // poll every 3s while running
   });
 }
+
+export function useMarkets() {
+  return useQuery({
+    queryKey: ['data', 'markets'],
+    queryFn: () => api.data.markets(),
+    staleTime: 60 * 60_000,
+  });
+}
+
+export function useAddSymbol() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (symbol: string) => api.data.addSymbol(symbol),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['instruments'] });
+      qc.invalidateQueries({ queryKey: ['data', 'markets'] });
+      qc.invalidateQueries({ queryKey: ['data', 'status'] });
+    },
+  });
+}

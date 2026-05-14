@@ -1,16 +1,20 @@
 from fastapi import APIRouter, Query
 
-from app.core.exceptions import BusinessError
 from app.data.schemas import (
+    AddSymbolRequest,
+    AddSymbolResponse,
     DataStatus,
     InstrumentsResponse,
+    MarketsResponse,
     RefreshJobStatus,
     RefreshResponse,
 )
 from app.data.service import (
-    get_csi300,
+    add_custom_symbol,
     get_data_status,
     get_refresh_status,
+    list_instruments_for,
+    list_markets,
     start_refresh,
 )
 
@@ -36,14 +40,18 @@ def refresh_status(job_id: str) -> RefreshJobStatus:
     return get_refresh_status(job_id)
 
 
+@router.get("/markets", response_model=MarketsResponse)
+def markets() -> MarketsResponse:
+    return list_markets()
+
+
+@router.post("/symbols/add", response_model=AddSymbolResponse)
+def add_symbol(req: AddSymbolRequest) -> AddSymbolResponse:
+    return add_custom_symbol(req.symbol)
+
+
 @instruments_router.get("/instruments", response_model=InstrumentsResponse)
 def instruments(
-    market: str = Query(default="csi300", description="Market identifier, only csi300 supported"),
+    market: str = Query(default="csi300", description="Market identifier; use 'all' for union"),
 ) -> InstrumentsResponse:
-    if market != "csi300":
-        raise BusinessError(
-            "market not supported",
-            code="unsupported_market",
-            context={"market": market},
-        )
-    return get_csi300()
+    return list_instruments_for(market)

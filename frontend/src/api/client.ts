@@ -66,6 +66,17 @@ export const api = {
         paths['/api/data/refresh/{job_id}']['get']['responses']['200']['content']['application/json'];
       return request<R>(`/api/data/refresh/${encodeURIComponent(jobId)}`);
     },
+    markets: () => {
+      type R = paths['/api/data/markets']['get']['responses']['200']['content']['application/json'];
+      return request<R>('/api/data/markets');
+    },
+    addSymbol: (symbol: string) => {
+      type R = paths['/api/data/symbols/add']['post']['responses']['200']['content']['application/json'];
+      return request<R>('/api/data/symbols/add', {
+        method: 'POST',
+        body: JSON.stringify({ symbol }),
+      });
+    },
   },
   instruments: (market = 'csi300') => {
     type R = paths['/api/instruments']['get']['responses']['200']['content']['application/json'];

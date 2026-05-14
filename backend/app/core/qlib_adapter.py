@@ -97,10 +97,29 @@ def next_trading_days(after: str | pd.Timestamp, n: int = 2) -> list[pd.Timestam
 
 
 def get_csi300_instruments() -> list[str]:
+    """Compatibility wrapper. Prefer get_instruments_for_market('csi300')."""
     init_qlib_once()
     inst_dict = D.instruments("csi300")
     inst_list = D.list_instruments(instruments=inst_dict, as_list=True)
     return sorted(inst_list)
+
+
+def get_instruments_for_market(market: str) -> list[str]:
+    """Read instruments/{market}.txt from qlib_dir and return symbols (uppercase qlib format).
+
+    Falls back to empty list if the file doesn't exist.
+    """
+    init_qlib_once()
+    s = Settings()
+    f = s.qlib_data_dir / "instruments" / f"{market}.txt"
+    if not f.is_file():
+        return []
+    out = []
+    for line in f.read_text(encoding="utf-8").splitlines():
+        sym = line.split("\t")[0].strip()
+        if sym and not sym.startswith("#"):
+            out.append(sym)
+    return out
 
 
 def get_calendar_info() -> tuple[date, int]:
@@ -112,22 +131,71 @@ def get_calendar_info() -> tuple[date, int]:
     return pd.Timestamp(cal[-1]).date(), int(len(cal))
 
 
-def get_csi300_with_names() -> list[dict]:
-    """Returns [{symbol, name}] for CSI300 with Chinese names from production cache file."""
-    instruments = get_csi300_instruments()
-    cache_path = Path(__file__).resolve().parents[3] / "production" / "cn_names_cache.json"
+def get_market_with_names(market: str) -> list[dict]:
+    """Like get_csi300_with_names but for any market. Returns [{symbol, name}, ...]."""
+    import json
+    init_qlib_once()
+    symbols = get_instruments_for_market(market)
+
+    # qlib_adapter.py -> core/ -> app/ -> backend/ -> <repo root>
+    project_root = Path(__file__).resolve().parents[3]
+    cache_path = project_root / "production" / "cn_names_cache.json"
     name_map: dict[str, str] = {}
     if cache_path.is_file():
         try:
-            import json
-            data = json.loads(cache_path.read_text(encoding="utf-8"))
-            name_map = data.get("map", {}) or {}
+            blob = json.loads(cache_path.read_text(encoding="utf-8"))
+            raw = blob.get("map", {}) or {}
+            for sym in symbols:
+                bare = sym[2:] if sym.startswith(("SH", "SZ")) else sym
+                name_map[sym] = raw.get(bare, "")
         except Exception:
-            name_map = {}
-    out: list[dict] = []
-    for sym in instruments:
-        code = sym[2:] if sym[:2] in {"SH", "SZ"} else sym
-        out.append({"symbol": sym, "name": name_map.get(code, "")})
+            pass
+
+    # ETF names: fall back to production/etf_names.json since cn_names_cache is A-share only.
+    etf_names_path = project_root / "production" / "etf_names.json"
+    if etf_names_path.is_file():
+        try:
+            etf_map = json.loads(etf_names_path.read_text(encoding="utf-8"))
+            for sym in symbols:
+                if not name_map.get(sym):
+                    name_map[sym] = etf_map.get(sym, "")
+        except Exception:
+            pass
+
+    return [{"symbol": sym, "name": name_map.get(sym, "")} for sym in symbols]
+
+
+def get_csi300_with_names() -> list[dict]:
+    """Returns [{symbol, name}] for CSI300 with Chinese names from production cache file."""
+    return get_market_with_names("csi300")
+
+
+def list_available_markets() -> list[dict]:
+    """Scan instruments/ dir for *.txt files. Return [{name, count, label}, ...]."""
+    init_qlib_once()
+    s = Settings()
+    inst_dir = s.qlib_data_dir / "instruments"
+    if not inst_dir.is_dir():
+        return []
+    # Label map; unknown markets get name as label
+    labels = {
+        "csi300": "沪深300",
+        "csi500": "中证500",
+        "etfs": "热门ETF",
+        "custom": "自定义",
+        "all": "全部",
+    }
+    out = []
+    for txt in sorted(inst_dir.glob("*.txt")):
+        name = txt.stem
+        if name == "all":
+            continue  # exclude the union meta file from user-facing list
+        try:
+            with txt.open("r", encoding="utf-8") as fh:
+                count = sum(1 for ln in fh if ln.strip())
+        except Exception:
+            count = 0
+        out.append({"name": name, "label": labels.get(name, name), "count": count})
     return out
 
 

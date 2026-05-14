@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useDataStatus, useRefreshData, useRefreshJob } from '@/data/hooks';
+import { useDataStatus, useMarkets, useRefreshData, useRefreshJob } from '@/data/hooks';
 import SymbolSearch, { loadRecent } from '@/components/SymbolSearch';
 import { cn } from '@/lib/utils';
 
@@ -34,6 +34,7 @@ export default function Dashboard() {
   };
 
   const recent = loadRecent();
+  const { data: markets } = useMarkets();
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -70,6 +71,36 @@ export default function Dashboard() {
             上次数据更新: {new Date(status.last_refresh_at).toLocaleString('zh-CN')}
           </div>
         )}
+      </div>
+
+      {/* Data sources card */}
+      <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-5">
+        <h2 className="text-sm font-semibold text-[#8b949e] uppercase tracking-wider mb-3">
+          数据源
+        </h2>
+        {markets ? (
+          <div className="space-y-2 text-sm">
+            {markets.markets.map((m) => (
+              <div key={m.name} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+                  <span>{m.label}</span>
+                  <span className="text-xs text-[#6e7681] font-mono">({m.name})</span>
+                </div>
+                <span className="text-[#8b949e] font-mono">{m.count} 只</span>
+              </div>
+            ))}
+            <div className="border-t border-[#30363d] pt-2 mt-2 flex justify-between">
+              <span className="text-[#8b949e]">合计 (去重)</span>
+              <span className="font-mono">{markets.total} 只</span>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-[#8b949e]">加载中…</div>
+        )}
+        <p className="text-xs text-[#6e7681] mt-3">
+          刷新数据时所有数据源会一并更新。要新增任意 A 股代码（如 SH601398），到搜索框输入即可。
+        </p>
       </div>
 
       {/* Refresh control */}

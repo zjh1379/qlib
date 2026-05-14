@@ -89,6 +89,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/data/markets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Markets */
+        get: operations["markets_api_data_markets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/data/symbols/add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Symbol */
+        post: operations["add_symbol_api_data_symbols_add_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/instruments": {
         parameters: {
             query?: never;
@@ -127,6 +161,23 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AddSymbolRequest */
+        AddSymbolRequest: {
+            /**
+             * Symbol
+             * @description qlib format e.g. "SH601398"
+             */
+            symbol: string;
+        };
+        /** AddSymbolResponse */
+        AddSymbolResponse: {
+            /** Symbol */
+            symbol: string;
+            /** Fetched Rows */
+            fetched_rows: number;
+            /** Message */
+            message: string;
+        };
         /** CandleBar */
         CandleBar: {
             /**
@@ -228,6 +279,34 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["InstrumentItem"][];
+        };
+        /** MarketInfo */
+        MarketInfo: {
+            /**
+             * Name
+             * @description "csi300" | "csi500" | "etfs" | "custom" | ...
+             */
+            name: string;
+            /**
+             * Label
+             * @description Human-readable label, e.g. "沪深300"
+             */
+            label: string;
+            /**
+             * Count
+             * @description Number of symbols in this market
+             */
+            count: number;
+        };
+        /** MarketsResponse */
+        MarketsResponse: {
+            /** Markets */
+            markets: components["schemas"]["MarketInfo"][];
+            /**
+             * Total
+             * @description Sum of all markets' counts with dedup
+             */
+            total: number;
         };
         /**
          * PredictionBar
@@ -454,10 +533,63 @@ export interface operations {
             };
         };
     };
+    markets_api_data_markets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketsResponse"];
+                };
+            };
+        };
+    };
+    add_symbol_api_data_symbols_add_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddSymbolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddSymbolResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     instruments_api_instruments_get: {
         parameters: {
             query?: {
-                /** @description Market identifier, only csi300 supported */
+                /** @description Market identifier; use 'all' for union */
                 market?: string;
             };
             header?: never;

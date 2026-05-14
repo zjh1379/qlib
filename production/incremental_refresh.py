@@ -1,11 +1,11 @@
-"""Incremental CSI300 data refresh: only fetch missing days per stock.
+"""Incremental multi-market data refresh: only fetch missing days per symbol.
 
 Emits structured progress to stdout for the backend to parse:
     PROGRESS {"phase":"fetch","current":42,"total":300,"message":"sh.600519: +3 rows"}
 
 Phases (in order):
-    init       -> baostock login + getting CSI300 list
-    fetch      -> per-stock incremental OHLCV fetch
+    init       -> baostock login + getting market constituent lists
+    fetch      -> per-symbol incremental OHLCV fetch (across all selected markets)
     dump       -> dump_bin dump_update (single op, current=1 total=1 at start, both=1 at end)
     benchmark  -> SH000300 fetch + dump
     done       -> finished
@@ -16,6 +16,7 @@ Usage:
         [--qlib_dir <dir>] (default: ~/.qlib/qlib_data/cn_data_bs)
         [--start <YYYY-MM-DD>] (default: 2018-01-01, used only when CSV missing)
         [--full] force full re-fetch (skip incremental check)
+        [--markets csi300,csi500,etfs,custom] comma-separated subset (default: all four)
 """
 from __future__ import annotations
 
@@ -33,6 +34,33 @@ for _v in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY'
 
 import pandas as pd
 import baostock as bs
+
+
+# Hot ETFs (baostock codes). Verify each one fetches successfully; log warnings + skip failures.
+ETF_LIST: list[tuple[str, str]] = [
+    ("sh.510300", "沪深300ETF"),
+    ("sh.510500", "中证500ETF"),
+    ("sh.510050", "上证50ETF"),
+    ("sh.510880", "红利ETF"),
+    ("sz.159915", "创业板ETF"),
+    ("sz.159995", "芯片ETF华夏"),
+    ("sz.159599", "芯片ETF东财"),
+    ("sz.159770", "机器人ETF"),
+    ("sz.159928", "消费ETF"),
+    ("sh.512170", "医疗ETF"),
+    ("sh.512710", "军工龙头ETF"),
+    ("sh.512880", "证券ETF"),
+    ("sh.515030", "新能源车ETF"),
+    ("sh.512760", "半导体50ETF"),
+    ("sh.512480", "半导体ETF"),
+]
+
+MARKETS: dict[str, str] = {
+    "csi300": "沪深300",
+    "csi500": "中证500",
+    "etfs": "热门ETF",
+    "custom": "自定义",
+}
 
 
 def progress(phase: str, current: int, total: int, message: str = "") -> None:
@@ -121,6 +149,70 @@ def get_csi300_codes() -> list[str]:
     return df["code"].tolist()
 
 
+def get_csi500_codes() -> list[str]:
+    rs = bs.query_zz500_stocks()
+    if rs.error_code != "0":
+        raise RuntimeError(f"query_zz500_stocks failed: {rs.error_msg}")
+    rows = []
+    while rs.next():
+        rows.append(rs.get_row_data())
+    df = pd.DataFrame(rows, columns=rs.fields)
+    return df["code"].tolist()
+
+
+def get_etf_codes() -> list[str]:
+    return [code for code, _name in ETF_LIST]
+
+
+def get_custom_codes(repo_root: Path) -> list[str]:
+    """Read production/custom_symbols.txt; convert SH600519-format to sh.600519 for baostock."""
+    f = repo_root / "production" / "custom_symbols.txt"
+    if not f.is_file():
+        return []
+    codes = []
+    for line in f.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        # Accept either SH600519 or sh.600519 format
+        if s.startswith(("SH", "SZ")) and len(s) == 8:
+            codes.append(s[:2].lower() + "." + s[2:])
+        elif "." in s:
+            codes.append(s.lower())
+    return codes
+
+
+def write_market_instruments(qlib_dir: Path, csv_dir: Path, market_name: str, qlib_symbols: list[str]) -> None:
+    """Write instruments/{market_name}.txt by inspecting each symbol's CSV for first/last date.
+
+    Format: SYMBOL\tFIRST_DATE\tLAST_DATE  (qlib convention)
+    """
+    out_path = qlib_dir / "instruments" / f"{market_name}.txt"
+    lines = []
+    for sym in qlib_symbols:
+        csv = csv_dir / f"{sym}.csv"
+        if not csv.is_file():
+            continue
+        first = None
+        last = None
+        try:
+            with csv.open("r", encoding="utf-8") as f:
+                _header = f.readline()  # skip
+                for line in f:
+                    parts = line.split(",")
+                    if len(parts) < 2:
+                        continue
+                    if first is None:
+                        first = parts[1]
+                    last = parts[1]
+        except Exception:
+            continue
+        if first and last:
+            lines.append(f"{sym}\t{first}\t{last}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def run_dump_update(repo_root: Path, csv_dir: Path, qlib_dir: Path) -> None:
     """Call scripts/dump_bin.py dump_update via subprocess."""
     dump_bin = repo_root / "scripts" / "dump_bin.py"
@@ -196,24 +288,20 @@ def refresh_benchmark(csv_dir: Path, repo_root: Path, qlib_dir: Path) -> int:
     return n
 
 
-def write_csi300_instruments(qlib_dir: Path) -> None:
-    """Build instruments/csi300.txt from instruments/all.txt (excluding SH000300 if present)."""
-    all_file = qlib_dir / "instruments" / "all.txt"
-    csi_file = qlib_dir / "instruments" / "csi300.txt"
-    if not all_file.is_file():
-        return
-    lines = [ln for ln in all_file.read_text(encoding="utf-8").splitlines() if not ln.startswith("SH000300")]
-    csi_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--csv_dir", default=os.path.expanduser("~/.qlib/stock_data/csi300_csv"))
     p.add_argument("--qlib_dir", default=os.path.expanduser("~/.qlib/qlib_data/cn_data_bs"))
     p.add_argument("--start", default="2018-01-01")
     p.add_argument("--full", action="store_true", help="ignore incremental check")
+    p.add_argument(
+        "--markets",
+        default="csi300,csi500,etfs,custom",
+        help="comma-separated subset of csi300,csi500,etfs,custom",
+    )
     args = p.parse_args()
 
+    selected = [m.strip() for m in args.markets.split(",") if m.strip() in MARKETS]
     csv_dir = Path(args.csv_dir)
     qlib_dir = Path(args.qlib_dir)
     csv_dir.mkdir(parents=True, exist_ok=True)
@@ -222,14 +310,35 @@ def main():
     progress("init", 0, 1, "logging in to baostock")
     bs.login()
     try:
-        progress("init", 1, 1, "fetching CSI300 list")
-        codes = get_csi300_codes()
-        today_str = date.today().isoformat()
+        # 1. Build per-market code lists
+        progress("init", 1, 1, "fetching market constituent lists")
+        market_codes: dict[str, list[str]] = {}
+        if "csi300" in selected:
+            market_codes["csi300"] = get_csi300_codes()
+        if "csi500" in selected:
+            market_codes["csi500"] = get_csi500_codes()
+        if "etfs" in selected:
+            market_codes["etfs"] = get_etf_codes()
+        if "custom" in selected:
+            market_codes["custom"] = get_custom_codes(repo_root)
 
-        progress("fetch", 0, len(codes), f"start incremental fetch to {today_str}")
+        # 2. Union with provenance: a code may appear in multiple markets; we fetch once.
+        all_codes: list[str] = []
+        seen: set[str] = set()
+        market_to_qlib_syms: dict[str, list[str]] = {m: [] for m in market_codes}
+        for m, codes in market_codes.items():
+            for c in codes:
+                qs = to_qlib_symbol(c)
+                market_to_qlib_syms[m].append(qs)
+                if c not in seen:
+                    seen.add(c)
+                    all_codes.append(c)
+
+        today_str = date.today().isoformat()
+        progress("fetch", 0, len(all_codes), f"start incremental fetch to {today_str}")
+
         total_appended = 0
-        skipped_uptodate = 0
-        for i, bs_code in enumerate(codes, 1):
+        for i, bs_code in enumerate(all_codes, 1):
             sym = to_qlib_symbol(bs_code)
             target = csv_dir / f"{sym}.csv"
             start = args.start
@@ -238,33 +347,33 @@ def main():
                 if last is not None:
                     start = (last + timedelta(days=1)).isoformat()
             if date.fromisoformat(start) > date.fromisoformat(today_str):
-                skipped_uptodate += 1
-                progress("fetch", i, len(codes), f"{bs_code}: already up to date")
+                progress("fetch", i, len(all_codes), f"{bs_code}: already up to date")
                 continue
             try:
                 df = fetch_one(bs_code, start, today_str)
             except Exception as e:
-                progress("fetch", i, len(codes), f"{bs_code}: ERROR {e}")
+                progress("fetch", i, len(all_codes), f"{bs_code}: ERROR {e}")
                 continue
             n = append_to_csv(target, sym, df) if not df.empty else 0
             total_appended += n
-            progress("fetch", i, len(codes), f"{bs_code}: +{n} rows")
+            progress("fetch", i, len(all_codes), f"{bs_code}: +{n} rows")
 
-        progress(
-            "dump", 0, 1,
-            f"updating qlib bins (appended ~{total_appended} rows total, {skipped_uptodate} stocks already current)",
-        )
-        if total_appended > 0 or skipped_uptodate < len(codes):
-            run_dump_update(repo_root, csv_dir, qlib_dir)
+        # 3. dump_bin update
+        progress("dump", 0, 1, f"updating qlib bins (~{total_appended} new rows)")
+        run_dump_update(repo_root, csv_dir, qlib_dir)
         progress("dump", 1, 1, "bins updated")
 
+        # 4. Per-market instruments files
+        for m, qsyms in market_to_qlib_syms.items():
+            if qsyms:
+                write_market_instruments(qlib_dir, csv_dir, m, qsyms)
+
+        # 5. Benchmark
         progress("benchmark", 0, 1, "fetching SH000300 benchmark")
         bench_rows = refresh_benchmark(csv_dir, repo_root, qlib_dir)
         progress("benchmark", 1, 1, f"benchmark +{bench_rows} rows")
 
-        write_csi300_instruments(qlib_dir)
-
-        # Read final calendar end for the success message
+        # 6. Final calendar end
         cal_file = qlib_dir / "calendars" / "day.txt"
         cal_end = "?"
         if cal_file.is_file():
@@ -278,7 +387,7 @@ def main():
                         cal_end = last[-1]
             except Exception:
                 pass
-        progress("done", 1, 1, f"完成 · calendar_end={cal_end}")
+        progress("done", 1, 1, f"完成 · calendar_end={cal_end} · markets={','.join(selected)}")
     finally:
         bs.logout()
 

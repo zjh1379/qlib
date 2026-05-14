@@ -61,12 +61,33 @@ async def test_instruments_csi300(client):
 
 
 @pytest.mark.asyncio
-async def test_instruments_unknown_market_400(client):
+async def test_instruments_unknown_market_404(client):
     r = await client.get("/api/instruments", params={"market": "foo"})
-    assert r.status_code == 400, r.text
+    assert r.status_code == 404, r.text
     body = r.json()
-    assert body["code"] == "unsupported_market"
+    assert body["code"] == "market_missing"
     assert body["context"]["market"] == "foo"
+
+
+@pytest.mark.asyncio
+async def test_markets_endpoint(client):
+    r = await client.get("/api/data/markets")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "markets" in body
+    assert "total" in body
+    # csi300 should be there from prior runs
+    names = {m["name"] for m in body["markets"]}
+    assert "csi300" in names
+
+
+@pytest.mark.asyncio
+async def test_add_symbol_invalid_format_400(client):
+    r = await client.post("/api/data/symbols/add", json={"symbol": "BOGUS"})
+    # invalid_symbol raises ConflictError (http 409)
+    assert r.status_code in (400, 409), r.text
+    body = r.json()
+    assert body["code"] == "invalid_symbol"
 
 
 @pytest.mark.asyncio

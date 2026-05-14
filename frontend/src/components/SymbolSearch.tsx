@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useInstruments } from '@/data/hooks';
+import { useAddSymbol, useInstruments } from '@/data/hooks';
 import { cn } from '@/lib/utils';
 
 interface Instrument {
@@ -15,6 +15,11 @@ interface Props {
 }
 
 const RECENT_KEY = 'qlib-recent-symbols';
+const SYMBOL_RE = /^(SH|SZ)\d{6}$/i;
+
+function isValidSymbolFormat(s: string): boolean {
+  return SYMBOL_RE.test(s.trim());
+}
 
 export function loadRecent(): string[] {
   try {
@@ -35,12 +40,13 @@ export default function SymbolSearch({
   placeholder = '搜索股票（代码 / 名称）',
   size = 'md',
 }: Props) {
-  const { data, isPending } = useInstruments();
+  const { data, isPending } = useInstruments('all');
   const items: Instrument[] = data?.items ?? [];
 
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const addMut = useAddSymbol();
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -54,11 +60,28 @@ export default function SymbolSearch({
       .slice(0, 20);
   }, [q, items]);
 
+  const trimmedUpper = q.trim().toUpperCase();
+  const noResultsButValidSymbol =
+    filtered.length === 0 && isValidSymbolFormat(trimmedUpper);
+
   const go = (symbol: string) => {
     saveRecent(symbol);
     setQ('');
     setOpen(false);
     navigate(`/charts/${symbol}`);
+  };
+
+  const handleAdd = async (sym: string) => {
+    try {
+      await addMut.mutateAsync(sym);
+      saveRecent(sym);
+      setQ('');
+      setOpen(false);
+      navigate(`/charts/${sym}`);
+    } catch (e) {
+      // surfaced via addMut.isError below
+      console.error('add symbol failed', e);
+    }
   };
 
   return (
@@ -100,6 +123,30 @@ export default function SymbolSearch({
               <span className="text-[#8b949e]">{it.name || '—'}</span>
             </li>
           ))}
+        </ul>
+      )}
+      {open && filtered.length === 0 && q.trim().length > 0 && (
+        <ul className="absolute z-50 mt-1 w-full rounded-md border border-[#30363d] bg-[#0d1117] shadow-xl">
+          <li className="px-3 py-2 text-xs text-[#6e7681]">
+            未找到与 "{q}" 匹配的股票
+          </li>
+          {noResultsButValidSymbol && (
+            <li
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleAdd(trimmedUpper)}
+              className={cn(
+                'cursor-pointer px-3 py-2 hover:bg-[#1f6feb] text-sm flex items-center justify-between gap-2',
+                addMut.isPending && 'opacity-50 cursor-wait',
+              )}
+            >
+              <span>
+                📥 添加 <span className="font-mono">{trimmedUpper}</span> 到下载列表
+              </span>
+              <span className="text-xs text-[#8b949e]">
+                {addMut.isPending ? '抓取中…' : '点击下载'}
+              </span>
+            </li>
+          )}
         </ul>
       )}
     </div>

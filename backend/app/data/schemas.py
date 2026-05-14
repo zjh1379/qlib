@@ -50,3 +50,24 @@ class RefreshJobStatus(BaseModel):
         None,
         description="Latest structured progress emitted by the refresh script, if any.",
     )
+
+
+class MarketInfo(BaseModel):
+    name: str = Field(..., description='"csi300" | "csi500" | "etfs" | "custom" | ...')
+    label: str = Field(..., description='Human-readable label, e.g. "沪深300"')
+    count: int = Field(..., description="Number of symbols in this market")
+
+
+class MarketsResponse(BaseModel):
+    markets: list[MarketInfo]
+    total: int = Field(..., description="Sum of all markets' counts with dedup")
+
+
+class AddSymbolRequest(BaseModel):
+    symbol: str = Field(..., description='qlib format e.g. "SH601398"')
+
+
+class AddSymbolResponse(BaseModel):
+    symbol: str
+    fetched_rows: int
+    message: str
