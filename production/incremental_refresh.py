@@ -37,22 +37,70 @@ import baostock as bs
 
 
 # Hot ETFs (baostock codes). Verify each one fetches successfully; log warnings + skip failures.
+# Organized by theme for clarity. Add new themes / codes here.
 ETF_LIST: list[tuple[str, str]] = [
+    # === 宽基指数 ===
     ("sh.510300", "沪深300ETF"),
     ("sh.510500", "中证500ETF"),
     ("sh.510050", "上证50ETF"),
     ("sh.510880", "红利ETF"),
+    ("sh.510180", "上证180ETF"),
+    ("sh.588000", "科创50ETF"),
+    ("sh.560090", "中证1000ETF"),
+    ("sh.560060", "中证A50ETF"),
     ("sz.159915", "创业板ETF"),
+    ("sz.159949", "创业板50ETF"),
+
+    # === 半导体 / 芯片 ===
     ("sz.159995", "芯片ETF华夏"),
     ("sz.159599", "芯片ETF东财"),
-    ("sz.159770", "机器人ETF"),
-    ("sz.159928", "消费ETF"),
-    ("sh.512170", "医疗ETF"),
-    ("sh.512710", "军工龙头ETF"),
-    ("sh.512880", "证券ETF"),
-    ("sh.515030", "新能源车ETF"),
-    ("sh.512760", "半导体50ETF"),
     ("sh.512480", "半导体ETF"),
+    ("sh.512760", "半导体50ETF"),
+    ("sh.516920", "集成电路ETF"),
+    ("sz.159801", "半导体设备ETF"),
+
+    # === 人工智能 / 科技 ===
+    ("sh.515980", "人工智能AIETF"),
+    ("sh.512720", "计算机ETF"),
+    ("sh.515050", "5GETF"),
+
+    # === 机器人 / 智能制造 ===
+    ("sz.159770", "机器人ETF"),
+
+    # === 航天 / 军工 ===
+    ("sh.512710", "军工龙头ETF"),
+    ("sh.512560", "军工ETF"),
+    ("sz.159518", "航天航空ETF"),
+
+    # === 医药 / 生物 ===
+    ("sh.512170", "医疗ETF"),
+    ("sh.512290", "生物医药ETF"),
+    ("sh.515210", "创新药ETF"),
+
+    # === 新能源 / 锂电 / 光伏 ===
+    ("sh.515030", "新能源车ETF"),
+    ("sh.515790", "光伏ETF"),
+    ("sz.159875", "锂电池ETF"),
+    ("sz.159611", "电力ETF"),
+
+    # === 消费 / 食品 / 酒 ===
+    ("sz.159928", "消费ETF"),
+    ("sh.512690", "酒ETF"),
+    ("sh.515170", "食品饮料ETF"),
+
+    # === 金融 / 房地产 ===
+    ("sh.512880", "证券ETF"),
+    ("sh.512800", "银行ETF"),
+    ("sh.512000", "券商ETF"),
+    ("sh.512200", "房地产ETF"),
+
+    # === 港股 / 海外 ===
+    ("sh.513050", "中概互联ETF"),
+    ("sh.513180", "恒生科技ETF"),
+    ("sh.513060", "恒生医药ETF"),
+
+    # === 商品 / 黄金 ===
+    ("sh.518880", "黄金ETF"),
 ]
 
 MARKETS: dict[str, str] = {
@@ -162,6 +210,19 @@ def get_csi500_codes() -> list[str]:
 
 def get_etf_codes() -> list[str]:
     return [code for code, _name in ETF_LIST]
+
+
+def write_etf_names_json(repo_root: Path) -> None:
+    """Sync production/etf_names.json from ETF_LIST so the frontend sees
+    Chinese names. Single source of truth = ETF_LIST in this file."""
+    out: dict[str, str] = {}
+    for code, name in ETF_LIST:
+        # baostock 'sh.510300' -> qlib 'SH510300'
+        market, num = code.split(".")
+        qlib_sym = market.upper() + num
+        out[qlib_sym] = name
+    target = repo_root / "production" / "etf_names.json"
+    target.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def get_custom_codes(repo_root: Path) -> list[str]:
@@ -306,6 +367,10 @@ def main():
     qlib_dir = Path(args.qlib_dir)
     csv_dir.mkdir(parents=True, exist_ok=True)
     repo_root = Path(__file__).resolve().parent.parent
+
+    # Keep production/etf_names.json in sync with ETF_LIST so the frontend
+    # always sees up-to-date Chinese names, even before any data is fetched.
+    write_etf_names_json(repo_root)
 
     progress("init", 0, 1, "logging in to baostock")
     bs.login()
