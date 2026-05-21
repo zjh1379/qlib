@@ -1,0 +1,23 @@
+# LightGBM-Alpha158 hyperparameters (locked per spec §5).
+# One copy of these params is reused for all 3 horizons (1d, 5d, 20d).
+
+model:
+  class: LGBModel
+  module_path: qlib.contrib.model.gbdt
+  kwargs:
+    loss: mse
+    learning_rate: 0.05
+    colsample_bytree: 0.8879
+    subsample: 0.8789
+    lambda_l1: 205.6999
+    lambda_l2: 580.9768
+    max_depth: 8
+    num_leaves: 210
+    num_threads: 20
+    num_boost_round: 1000
+    early_stopping_rounds: 50
+
+handler:
+  class: Alpha158_OpenH
+  module_path: custom_handler
+  # horizon_days is filled in per-horizon at runtime by rolling_train.py
