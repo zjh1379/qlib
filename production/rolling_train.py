@@ -5,9 +5,10 @@ Usage:
   python -m production.rolling_train backfill 2024-01-01..2024-12-31
   python -m production.rolling_train evaluate <recorder-id>
 
-Phase C scope: only the `lgbm` base model is wired in (3 horizons). ALSTM and
-TRA are added in Phase D and E respectively. The ensemble step in Phase C is
-a stub: it copies lgbm_5d as the unified score.
+Phase E (beta complete): runs all 3 base models (LightGBM/ALSTM/TRA) x 3 horizons,
+fits a Ridge stacker on the valid-window OOF preds, falls back to rank-average
+if stacking fails, and emits a single pred.pkl with score + consensus + base
+columns. See docs/superpowers/specs/2026-05-21-rolling-ensemble-algorithm-design.md.
 """
 from __future__ import annotations
 
@@ -219,13 +220,43 @@ def run_once(cfg: RollingConfig, end_date: date) -> Path:
 
     base_preds = pd.concat(series_list, axis=1).dropna(how="all")
 
-    # Ensemble step — Phase D: rank-average across all base columns.
-    # Phase E (T17) replaces with Ridge stacking; this remains as the fallback.
+    # Ensemble step — Phase E: Ridge stacking with OOF training, plus a
+    # 3-level fallback chain: Ridge -> rank_average -> roll back to last week.
+    from production.ensemble_stacker import RidgeStacker
     from production.ensemble_rank_avg import rank_average
 
-    rank_avg_series = rank_average(base_preds)
-    # Convert "lower rank = better" to a higher-is-better score by negating.
-    unified = (-rank_avg_series).rename("score")
+    # OOF training data: pull realized 5d open-to-open labels for the valid
+    # window. The beta phase approximates by reusing the valid window predictions
+    # because all three base models early-stop on valid (not fit on it). A
+    # dedicated Stack-fit window is a gamma improvement.
+    try:
+        from qlib.data import D
+        h5 = next(h for h in cfg.horizons if h.name == "5d")
+        s_5 = split(end_date=end_date, cfg=h5)
+        label_expr = "Ref($open, -6) / Ref($open, -1) - 1"
+        labels = D.features(
+            instruments=universe_name,
+            fields=[label_expr],
+            start_time=str(s_5.valid_start),
+            end_time=str(s_5.valid_end),
+        )
+        labels.columns = ["y"]
+        labels.index.names = ["instrument", "datetime"]
+        labels = labels.swaplevel("instrument", "datetime").sort_index()
+
+        # base_preds restricted to the valid window
+        valid_mask = (
+            (base_preds.index.get_level_values("datetime") >= pd.Timestamp(s_5.valid_start))
+            & (base_preds.index.get_level_values("datetime") <= pd.Timestamp(s_5.valid_end))
+        )
+        valid_base = base_preds[valid_mask]
+        stacker = RidgeStacker().fit_oof(valid_base, labels["y"])
+        unified = stacker.predict_with_fallback(base_preds).rename("score")
+        _log.info("stacker_fitted_ok alpha=%s", stacker.alpha)
+    except Exception as exc:
+        _log.warning("stacker_failed_using_rank_average error=%s", str(exc))
+        rank_avg_series = rank_average(base_preds)
+        unified = (-rank_avg_series).rename("score")
 
     out = base_preds.copy()
     out["score"] = unified
