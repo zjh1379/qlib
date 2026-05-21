@@ -45,9 +45,10 @@ async def lifespan(app: FastAPI):
 
     manager = SchedulerManager(retrain_job)
     set_manager(manager)
-    from app.core.db import _session_maker
-    assert _session_maker is not None
-    async with _session_maker() as session:
+    from app.core import db as _db
+    if _db._session_maker is None:
+        raise RuntimeError("DB singletons not initialized — init_db_singletons() must run before scheduling start")
+    async with _db._session_maker() as session:
         await manager.start(session)
 
     log.info("app_started", port=settings.api_port)

@@ -1,8 +1,9 @@
 import pytest
 from sqlalchemy import update
 
-from app.core.db import _session_maker, init_db_singletons
+from app.core import db as db_mod
 from app.core.config import Settings
+from app.core.db import init_db_singletons
 
 
 @pytest.fixture(autouse=True)
@@ -13,24 +14,16 @@ async def reset_retrain_schedule_row():
     fixture the suite is non-idempotent — running it twice fails on the second
     run because row 1 still carries the values written by a prior test.
     """
-    # The DB singletons are initialized inside the FastAPI lifespan by each
-    # test's client fixture. For tests that don't use that fixture (or for
-    # the reset-before phase) we may not have a session maker yet — fall back
-    # to a one-shot init from Settings.
-    if _session_maker is None:
+    if db_mod._session_maker is None:
         init_db_singletons(Settings())
 
+    # Late import — the orm module imports from app.core.db, which we just
+    # ensured is initialized.
     from app.scheduling.orm import RetrainScheduleORM
 
-    # The session maker was just (re)initialized — re-import to get the live
-    # reference (the module-level `_session_maker` is shadowed at function scope).
-    from app.core import db as db_mod
-
     if db_mod._session_maker is None:
-        # Bail silently if init failed; the test will likely fail on its own
-        # with a clear error.
-        yield
-        return
+        # init_db_singletons failed for some reason; bail with a clear test failure
+        pytest.fail("could not initialize DB singletons for retrain_schedule reset fixture")
 
     async with db_mod._session_maker() as session:
         await session.execute(
@@ -42,5 +35,3 @@ async def reset_retrain_schedule_row():
         await session.commit()
 
     yield
-
-    # No post-test cleanup needed — next test's pre-fixture will reset again.
