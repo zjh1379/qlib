@@ -25,7 +25,7 @@ P1.5 already shipped a working Picks page + data scope expansion. We now have da
 ### Goals (β phase)
 
 1. Replace single LightGBM with a **3-model ensemble**: LightGBM + ALSTM + TRA.
-2. Stand up a **weekly walk-forward rolling retrain** pipeline (cron Sunday 22:00).
+2. Stand up a **weekly walk-forward rolling retrain** pipeline (default Sunday 22:00, **configurable in-app**).
 3. Fix five quant-research-grade issues: PIT constituents, realistic label, multi-horizon, stacking, turnover smoothing.
 4. Expand training universe to **CSI800** (CSI300 + CSI500 union, with PIT filtering).
 5. Add evaluation discipline: multi-metric scorecard, regime split, shadow paper trading, auto rollback.
@@ -112,7 +112,7 @@ P1.5 already shipped a working Picks page + data scope expansion. We now have da
                           └─────────────────────────────┘
 
   ┌────────────────────────────────────────────────────┐
-  │  Weekly rolling retrain · Sunday 22:00             │
+  │  Weekly rolling retrain · configurable (default Sun 22:00) │
   │                                                    │
   │  |── 5y Train ──|── 1y Valid ──|── 1y Stack ──|── 1w Test ──|
   │                                                    │
@@ -133,7 +133,7 @@ P1.5 already shipped a working Picks page + data scope expansion. We now have da
 | NN models | PyTorch on CUDA (3080Ti / 5070Ti) |
 | Meta-learner | scikit-learn Ridge |
 | Tracking | mlflow file store (existing `examples/mlruns/`) |
-| Scheduling | Windows Task Scheduler (cron-equivalent) |
+| Scheduling | APScheduler in FastAPI lifespan, config persisted in DB, UI-editable |
 | Data source | baostock (PIT) + cn_data_bs (existing) |
 
 ## 5. Model Details
@@ -195,25 +195,36 @@ They make different errors → ensemble diversity gain.
 
 ## 6. Training Pipeline
 
-### Stages (Sunday 22:00)
+### Stages (run order; offsets measured from trigger time T₀, default Sunday 22:00)
 
 ```
-22:00  ① Data integrity check (re-run incremental refresh)
-22:02  ② Build PIT training universe (CSI300 + CSI500 monthly snapshots)
-22:05  ③ Train base models (sequentially):
-       ├─ LightGBM × 3 horizons     (15 min, CPU)
-       ├─ ALSTM multi-head          (25 min, GPU)
-       └─ TRA multi-head            (50 min, GPU)
-23:35  ④ Generate OOF base predictions on Stack-fit 1y window
-23:40  ⑤ Fit stacking Ridge meta-learner (<1 min, CPU)
-23:41  ⑥ Generate predictions for next week's test window
-       └─ EWMA post-processing
-23:45  ⑦ Backtest evaluation (8 metrics, multi-regime split)
-23:50  ⑧ Compare vs last-week model (paired t-test) → decide swap or hold
-23:55  ⑨ Write mlruns + invalidate /api/models cache
+T₀+00:00  ① Data integrity check (re-run incremental refresh)
+T₀+00:02  ② Build PIT training universe (CSI300 + CSI500 monthly snapshots)
+T₀+00:05  ③ Train base models (sequentially):
+          ├─ LightGBM × 3 horizons     (15 min, CPU)
+          ├─ ALSTM multi-head          (25 min, GPU)
+          └─ TRA multi-head            (50 min, GPU)
+T₀+01:35  ④ Generate OOF base predictions on Stack-fit 1y window
+T₀+01:40  ⑤ Fit stacking Ridge meta-learner (<1 min, CPU)
+T₀+01:41  ⑥ Generate predictions for next week's test window
+          └─ EWMA post-processing
+T₀+01:45  ⑦ Backtest evaluation (8 metrics, multi-regime split)
+T₀+01:50  ⑧ Compare vs last-week model (paired t-test) → decide swap or hold
+T₀+01:55  ⑨ Write mlruns + invalidate /api/models cache
 ```
 
 Total: ~2 hours wall clock.
+
+### Schedule configuration (in-app)
+
+The trigger time is **configurable inside the app** (no Windows Task Scheduler dependency):
+
+- DB table `retrain_schedule` with single-row config: `day_of_week` (0=Mon … 6=Sun), `hour`, `minute`, `enabled`, `last_run_at`, `next_run_at`.
+- Default value seeded on first boot: `(6, 22, 0, enabled=true)` — Sunday 22:00.
+- Backend uses **APScheduler** running in the FastAPI process; it reads config at startup and on every PUT.
+- On config change: drop the current job, recompute next-run, schedule new job. No restart needed.
+- Trading-hours guard: if user picks a slot inside `09:30-15:00 CST` on a weekday, backend rejects with `400 trigger_during_trading_hours`.
+- Manual "Run now" button calls `POST /api/scheduling/retrain/run-now` which spawns the same pipeline as the cron path (subject to the same trading-hours guard with a confirm-override flag).
 
 ### PIT (Point-in-Time) constituent handling
 
@@ -402,6 +413,10 @@ GET  /api/models/screen?view=tra
 GET  /api/models/shadow                       (new — shadow comparison)
 GET  /api/models/version                      (new — current/last/last-2 recorder metadata)
 POST /api/models/rollback                     (new — manual rollback to N-1 recorder)
+
+GET  /api/scheduling/retrain                  (new — read schedule config)
+PUT  /api/scheduling/retrain                  (new — update schedule config)
+POST /api/scheduling/retrain/run-now          (new — manual trigger; honors trading-hours guard)
 ```
 
 ### Schema additions
@@ -437,6 +452,11 @@ class ScreenItem(BaseModel):
 - Model version card (current recorder, last-week IR comparison, next retrain countdown).
 - Shadow monitor card (production vs shadow paper P&L during the 4-week shadow window).
 - Base contribution bar chart (Ridge coefficients).
+
+**Settings page** (~0.5 day):
+- Retrain schedule editor: day-of-week selector + time picker + enabled toggle.
+- Shows current `next_run_at` and `last_run_at`.
+- "Run now" button (disabled during trading hours unless force-confirmed).
 
 **Backend** (~1 day) — new endpoints listed above.
 
@@ -475,7 +495,8 @@ Total frontend effort: **~5 days** as P3.5 patch, parallel to or after β-phase 
 **Functional**
 
 - [ ] `production/rolling_train.py` runs end-to-end without manual intervention
-- [ ] Weekly Task Scheduler job triggers at Sunday 22:00 and completes within 2 hours
+- [ ] Weekly APScheduler job triggers at user-configured time (default Sunday 22:00) and completes within 2 hours
+- [ ] `/api/scheduling/retrain` GET/PUT works and rejects trading-hours slots
 - [ ] `pred.pkl` from latest ensemble recorder is consumed by Picks / Charts pages without code changes
 - [ ] All 3 base models trained; ALSTM and TRA use GPU; LightGBM uses CPU
 - [ ] PIT constituents file regenerated monthly; passes sanity range check
