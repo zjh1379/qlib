@@ -262,6 +262,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback */
+        post: operations["rollback_api_models_rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduling/retrain": {
         parameters: {
             query?: never;
@@ -658,6 +675,26 @@ export interface components {
             minute: number;
             /** Enabled */
             enabled: boolean;
+        };
+        /** RollbackRequest */
+        RollbackRequest: {
+            /**
+             * Target
+             * @description Which recorder to roll back to (previous_1 = the run before the current one).
+             * @default previous_1
+             */
+            target: string;
+        };
+        /** RollbackResponse */
+        RollbackResponse: {
+            /** Status */
+            status: string;
+            /** Archived Recorder Id */
+            archived_recorder_id?: string | null;
+            /** New Current Recorder Id */
+            new_current_recorder_id?: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** RunNowResponse */
         RunNowResponse: {
@@ -1317,6 +1354,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionResponse"];
+                };
+            };
+        };
+    };
+    rollback_api_models_rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RollbackResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

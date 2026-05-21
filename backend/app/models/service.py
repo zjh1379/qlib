@@ -300,3 +300,66 @@ def version_info() -> dict:
         "previous_2": previous_2,
         "next_retrain_at": next_run,
     }
+
+
+def rollback_to(target: str = "previous_1") -> dict:
+    """Move the current recorder's directory into production/archive/rolled_back/
+    so the next /api/models/screen call picks the (formerly) previous recorder
+    as the new current.
+
+    target = "previous_1" archives 1 recorder.
+    target = "previous_2" archives 2 recorders (rolls back two weeks).
+    """
+    import shutil
+    from pathlib import Path
+    from qlib.workflow import R
+
+    init_qlib_once()
+    from app.core.config import Settings as _Settings
+    settings = _Settings()
+    recs = sorted(
+        R.list_recorders(experiment_name=settings.retrain_recorder_experiment).values(),
+        key=lambda rr: rr.info.get("start_time", ""),
+        reverse=True,
+    )
+    if len(recs) < 2:
+        return {
+            "status": "no_op",
+            "archived_recorder_id": None,
+            "new_current_recorder_id": None,
+            "reason": "no_previous_recorder",
+        }
+
+    n_to_archive = 1 if target == "previous_1" else 2
+    if len(recs) < n_to_archive + 1:
+        return {
+            "status": "no_op",
+            "archived_recorder_id": None,
+            "new_current_recorder_id": None,
+            "reason": "insufficient_history",
+        }
+
+    mlruns_root = settings.mlruns_path
+    archive_root = Path(__file__).resolve().parents[3] / "production" / "archive" / "rolled_back"
+
+    archived_ids: list[str] = []
+    for rec in recs[:n_to_archive]:
+        rec_id = rec.id
+        for exp_dir in mlruns_root.iterdir():
+            if not exp_dir.is_dir():
+                continue
+            src = exp_dir / rec_id
+            if src.is_dir():
+                dest = archive_root / exp_dir.name / rec_id
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dest))
+                archived_ids.append(rec_id)
+                break
+
+    new_current = recs[n_to_archive].id if len(recs) > n_to_archive else None
+    return {
+        "status": "rolled_back" if archived_ids else "no_op",
+        "archived_recorder_id": ",".join(archived_ids) if archived_ids else None,
+        "new_current_recorder_id": new_current,
+        "reason": None if archived_ids else "recorder_dir_not_found",
+    }

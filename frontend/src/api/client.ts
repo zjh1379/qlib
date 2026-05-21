@@ -149,6 +149,14 @@ export const api = {
       type R = paths['/api/models/version']['get']['responses']['200']['content']['application/json'];
       return request<R>('/api/models/version');
     },
+    rollback: (target: 'previous_1' | 'previous_2' = 'previous_1') => {
+      type R =
+        paths['/api/models/rollback']['post']['responses']['200']['content']['application/json'];
+      return request<R>('/api/models/rollback', {
+        method: 'POST',
+        body: JSON.stringify({ target }),
+      });
+    },
   },
   scheduling: {
     getRetrain: () => {

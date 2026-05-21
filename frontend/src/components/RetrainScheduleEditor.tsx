@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ApiError } from '@/api/client';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { api, ApiError } from '@/api/client';
 import {
   type RetrainScheduleUpdate,
   useRetrainSchedule,
@@ -29,6 +30,13 @@ export default function RetrainScheduleEditor() {
   const { data, isPending, error } = useRetrainSchedule();
   const saveMut = useUpdateRetrainSchedule();
   const runNowMut = useRunRetrainNow();
+  const qc = useQueryClient();
+  const rollbackMut = useMutation({
+    mutationFn: async () => api.models.rollback('previous_1'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['model-version'] });
+    },
+  });
 
   const [draft, setDraft] = useState<RetrainScheduleUpdate | null>(null);
 
@@ -169,6 +177,18 @@ export default function RetrainScheduleEditor() {
         >
           {runNowMut.isPending ? '触发中…' : '立即运行'}
         </button>
+        <button
+          type="button"
+          disabled={rollbackMut.isPending}
+          className="px-3 py-1 rounded-md text-xs bg-red-700 text-white hover:bg-red-600 disabled:opacity-50"
+          onClick={() => {
+            if (confirm('回滚到上一周的模型？当前 recorder 会被归档。')) {
+              rollbackMut.mutate();
+            }
+          }}
+        >
+          {rollbackMut.isPending ? '回滚中…' : '回滚上一周'}
+        </button>
       </div>
 
       {saveMut.error && (
@@ -203,6 +223,23 @@ export default function RetrainScheduleEditor() {
       {runNowMut.error && (
         <div className="rounded-md border border-red-900 bg-red-950/30 p-3 text-sm text-red-400">
           触发失败: {errorMessage(runNowMut.error)}
+        </div>
+      )}
+
+      {rollbackMut.data?.status === 'no_op' && (
+        <div className="text-yellow-400 text-sm">
+          回滚未执行: {rollbackMut.data.reason}
+        </div>
+      )}
+      {rollbackMut.data?.status === 'rolled_back' && (
+        <div className="text-green-400 text-sm">
+          已回滚。归档: {rollbackMut.data.archived_recorder_id?.slice(0, 8)},
+          新 current: {rollbackMut.data.new_current_recorder_id?.slice(0, 8)}
+        </div>
+      )}
+      {rollbackMut.error && (
+        <div className="rounded-md border border-red-900 bg-red-950/30 p-3 text-sm text-red-400">
+          回滚失败: {errorMessage(rollbackMut.error)}
         </div>
       )}
 

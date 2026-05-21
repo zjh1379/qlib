@@ -58,3 +58,18 @@ class VersionResponse(BaseModel):
     previous: RecorderVersion | None = None
     previous_2: RecorderVersion | None = None
     next_retrain_at: str | None = None
+
+
+class RollbackRequest(BaseModel):
+    target: str = Field(
+        default="previous_1",
+        pattern="^(previous_1|previous_2)$",
+        description="Which recorder to roll back to (previous_1 = the run before the current one).",
+    )
+
+
+class RollbackResponse(BaseModel):
+    status: str           # "rolled_back" | "no_op"
+    archived_recorder_id: str | None = None
+    new_current_recorder_id: str | None = None
+    reason: str | None = None

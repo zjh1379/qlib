@@ -4,6 +4,8 @@ from app.models import service
 from app.models.schemas import (
     ExperimentsResponse,
     PredictionHistory,
+    RollbackRequest,
+    RollbackResponse,
     ScreenResponse,
     VersionResponse,
 )
@@ -41,3 +43,8 @@ def experiments():
 @router.get("/version", response_model=VersionResponse)
 def version():
     return service.version_info()
+
+
+@router.post("/rollback", response_model=RollbackResponse)
+def rollback(payload: RollbackRequest):
+    return service.rollback_to(target=payload.target)
