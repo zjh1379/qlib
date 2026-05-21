@@ -136,6 +136,10 @@ export const api = {
       type R = paths['/api/models/experiments']['get']['responses']['200']['content']['application/json'];
       return request<R>('/api/models/experiments');
     },
+    version: () => {
+      type R = paths['/api/models/version']['get']['responses']['200']['content']['application/json'];
+      return request<R>('/api/models/version');
+    },
   },
   scheduling: {
     getRetrain: () => {

@@ -5,6 +5,7 @@ from app.models.schemas import (
     ExperimentsResponse,
     PredictionHistory,
     ScreenResponse,
+    VersionResponse,
 )
 
 router = APIRouter()
@@ -32,3 +33,8 @@ def predictions(
 @router.get("/experiments", response_model=ExperimentsResponse)
 def experiments():
     return service.list_experiments()
+
+
+@router.get("/version", response_model=VersionResponse)
+def version():
+    return service.version_info()

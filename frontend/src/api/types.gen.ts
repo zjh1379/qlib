@@ -245,6 +245,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Version */
+        get: operations["version_api_models_version_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduling/retrain": {
         parameters: {
             query?: never;
@@ -573,6 +590,19 @@ export interface components {
              */
             message: string;
         };
+        /** RecorderVersion */
+        RecorderVersion: {
+            /** Recorder Id */
+            recorder_id: string;
+            /** Experiment */
+            experiment: string;
+            /** Created At */
+            created_at: string;
+            /** Metrics */
+            metrics?: {
+                [key: string]: number;
+            };
+        };
         /** RefreshJobStatus */
         RefreshJobStatus: {
             /** Job Id */
@@ -657,6 +687,15 @@ export interface components {
             rank_avg: number;
             /** Days In Top */
             days_in_top: number;
+            /**
+             * Consensus
+             * @default 0
+             */
+            consensus: number;
+            /** Base Scores */
+            base_scores?: {
+                [key: string]: number;
+            };
         };
         /** ScreenResponse */
         ScreenResponse: {
@@ -760,6 +799,14 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VersionResponse */
+        VersionResponse: {
+            current: components["schemas"]["RecorderVersion"];
+            previous?: components["schemas"]["RecorderVersion"] | null;
+            previous_2?: components["schemas"]["RecorderVersion"] | null;
+            /** Next Retrain At */
+            next_retrain_at?: string | null;
         };
     };
     responses: never;
@@ -1249,6 +1296,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExperimentsResponse"];
+                };
+            };
+        };
+    };
+    version_api_models_version_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionResponse"];
                 };
             };
         };

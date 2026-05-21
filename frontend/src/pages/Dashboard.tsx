@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useDataStatus, useMarkets, useRefreshData, useRefreshJob } from '@/data/hooks';
 import SymbolSearch, { loadRecent } from '@/components/SymbolSearch';
+import { api } from '@/api/client';
 import { cn } from '@/lib/utils';
 
 const POPULAR: Array<{ symbol: string; name: string }> = [
@@ -20,6 +22,56 @@ const FRESHNESS_LABEL: Record<string, { text: string; label: string }> = {
   stale_1d: { text: 'text-yellow-400', label: '🟡 stale (1 day)' },
   stale_2d_plus: { text: 'text-red-400', label: '🔴 stale (2+ days)' },
 };
+
+function ModelVersionCard() {
+  const { data } = useQuery({
+    queryKey: ['model-version'],
+    queryFn: () => api.models.version(),
+    refetchInterval: 60_000,
+  });
+
+  if (!data) {
+    return (
+      <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-5 text-sm text-[#8b949e]">
+        加载模型版本中…
+      </div>
+    );
+  }
+
+  const nextRun = data.next_retrain_at
+    ? new Date(data.next_retrain_at).toLocaleString('zh-CN')
+    : '—';
+  const ir = data.current.metrics?.ir;
+  const prevIr = data.previous?.metrics?.ir;
+  const delta = ir != null && prevIr != null ? (ir - prevIr).toFixed(3) : '—';
+
+  return (
+    <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-5">
+      <h2 className="text-sm font-semibold text-[#8b949e] uppercase tracking-wider mb-3">
+        模型版本
+      </h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div>
+          <div className="text-xs text-[#6e7681] uppercase tracking-wider">当前 recorder</div>
+          <div className="font-mono text-base mt-1">
+            {data.current.recorder_id ? data.current.recorder_id.slice(0, 8) : '—'}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-[#6e7681] uppercase tracking-wider">IR (Δ vs last)</div>
+          <div className="text-base mt-1">
+            {ir != null ? ir.toFixed(3) : '—'}{' '}
+            <span className="text-[#6e7681]">({delta})</span>
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-[#6e7681] uppercase tracking-wider">下次 retrain</div>
+          <div className="text-base mt-1">{nextRun}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { data: status, isPending: statusPending, error: statusError } = useDataStatus();
@@ -42,6 +94,8 @@ export default function Dashboard() {
         <h1 className="text-2xl font-semibold">Qlib Companion</h1>
         <p className="text-sm text-[#8b949e] mt-1">日内交易决策辅助 · CSI300 模型预测</p>
       </header>
+
+      <ModelVersionCard />
 
       {/* System status card */}
       <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-5">

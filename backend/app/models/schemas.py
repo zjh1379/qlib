@@ -44,3 +44,17 @@ class ExperimentInfo(BaseModel):
 
 class ExperimentsResponse(BaseModel):
     experiments: list[ExperimentInfo]
+
+
+class RecorderVersion(BaseModel):
+    recorder_id: str
+    experiment: str
+    created_at: str            # ISO timestamp
+    metrics: dict[str, float] = Field(default_factory=dict)
+
+
+class VersionResponse(BaseModel):
+    current: RecorderVersion
+    previous: RecorderVersion | None = None
+    previous_2: RecorderVersion | None = None
+    next_retrain_at: str | None = None

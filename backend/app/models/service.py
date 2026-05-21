@@ -219,3 +219,55 @@ def list_experiments() -> dict:
             continue
 
     return {"experiments": out}
+
+
+def version_info() -> dict:
+    """Return current/last/last-2 recorder metadata + next retrain ISO timestamp."""
+    init_qlib_once()
+    from qlib.workflow import R
+
+    from app.core.config import Settings as _Settings
+    settings = _Settings()
+    recs = R.list_recorders(experiment_name=settings.retrain_recorder_experiment)
+    sorted_recs = sorted(
+        recs.values(), key=lambda rr: rr.info.get("start_time", ""), reverse=True
+    )
+
+    def _to_dto(rr) -> dict:
+        metrics = {}
+        if hasattr(rr, "list_metrics"):
+            try:
+                metrics = dict(rr.list_metrics().items())
+            except Exception:
+                metrics = {}
+        return {
+            "recorder_id": rr.id,
+            "experiment": settings.retrain_recorder_experiment,
+            "created_at": str(rr.info.get("start_time", "")),
+            "metrics": metrics,
+        }
+
+    current = _to_dto(sorted_recs[0]) if len(sorted_recs) >= 1 else {
+        "recorder_id": "", "experiment": settings.retrain_recorder_experiment,
+        "created_at": "", "metrics": {},
+    }
+    previous = _to_dto(sorted_recs[1]) if len(sorted_recs) >= 2 else None
+    previous_2 = _to_dto(sorted_recs[2]) if len(sorted_recs) >= 3 else None
+
+    # Pull next retrain from the scheduler manager (T2/T4 exposes get_next_run_time)
+    next_run = None
+    try:
+        from app.scheduling.router import get_manager as _get_scheduler
+
+        mgr = _get_scheduler()
+        nrt = mgr.get_next_run_time()
+        next_run = nrt.isoformat() if nrt is not None else None
+    except Exception:
+        next_run = None
+
+    return {
+        "current": current,
+        "previous": previous,
+        "previous_2": previous_2,
+        "next_retrain_at": next_run,
+    }
