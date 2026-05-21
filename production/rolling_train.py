@@ -26,6 +26,20 @@ Known followups (deferred from beta to gamma):
 """
 from __future__ import annotations
 
+# --- IMPORTANT: sys.path fixup must run BEFORE any qlib import. ---
+# This repo is a checkout of microsoft/qlib with an uncompiled qlib/ source
+# directory at the worktree root. Running `python -m production.rolling_train`
+# from that root puts the empty string (cwd) at sys.path[0], so `import qlib`
+# finds the uncompiled source and fails on `qlib.data._libs.rolling`. We
+# insert the conda-env site-packages at the front of sys.path so the
+# installed qlib (with compiled .pyd extensions) wins.
+import sys as _sys
+import sysconfig as _sysconfig
+
+_PURELIB = _sysconfig.get_paths().get("purelib")
+if _PURELIB and _PURELIB not in _sys.path[:1]:
+    _sys.path.insert(0, _PURELIB)
+
 import argparse
 import logging
 import sys

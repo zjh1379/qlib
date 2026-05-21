@@ -177,7 +177,7 @@ def write_pit_instruments_file(
     lines = [f"{inst}\t{start_iso}\t{end_iso}" for inst in members]
     out_path.write_text("\n".join(lines) + "\n")
     _log.info(
-        "pit_instruments_written",
-        extra={"path": str(out_path), "count": len(members), "name": name},
+        "pit_instruments_written path=%s count=%d name=%s",
+        str(out_path), len(members), name,
     )
     return out_path
