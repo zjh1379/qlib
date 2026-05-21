@@ -14,7 +14,9 @@ from app.core.logging import configure_logging, get_logger
 from app.core.qlib_adapter import init_qlib_once
 from app.data.router import instruments_router as data_instruments_router
 from app.data.router import router as data_router
+from app.models.router import router as models_router
 from app.ops.router import router as ops_router
+from app.portfolio.router import router as portfolio_router
 
 
 @asynccontextmanager
@@ -54,6 +56,8 @@ def create_app() -> FastAPI:
     app.include_router(ops_router, prefix="/api/ops", tags=["ops"])
     app.include_router(data_router, prefix="/api/data", tags=["data"])
     app.include_router(data_instruments_router, prefix="/api", tags=["data"])
+    app.include_router(portfolio_router, prefix="/api/portfolio", tags=["portfolio"])
+    app.include_router(models_router, prefix="/api/models", tags=["models"])
 
     # Static serving of the built frontend (created in T18; tolerated if missing)
     static_dir = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
