@@ -17,6 +17,8 @@ from app.data.router import router as data_router
 from app.models.router import router as models_router
 from app.ops.router import router as ops_router
 from app.portfolio.router import router as portfolio_router
+from app.scheduling.router import router as scheduling_router, set_manager
+from app.scheduling.service import SchedulerManager, make_subprocess_retrain_job
 
 
 @asynccontextmanager
@@ -30,8 +32,27 @@ async def lifespan(app: FastAPI):
         log.info("qlib_ready")
     except Exception as e:
         log.warning("qlib_not_ready_at_boot", error=str(e))
+
+    # Scheduler manager — the real retrain runs `production.rolling_train run-once`
+    # in a *subprocess* so the FastAPI event loop is never blocked by the 1.5–4
+    # hours of CPU/GPU work. (The subprocess script is delivered in T10 onwards;
+    # before T10 lands the job will exit non-zero but never crash the API.)
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    retrain_job = make_subprocess_retrain_job(
+        python_path=settings.retrain_python_path,
+        repo_root=repo_root,
+    )
+
+    manager = SchedulerManager(retrain_job)
+    set_manager(manager)
+    from app.core.db import _session_maker
+    assert _session_maker is not None
+    async with _session_maker() as session:
+        await manager.start(session)
+
     log.info("app_started", port=settings.api_port)
     yield
+    await manager.stop()
     await dispose_db_singletons()
     log.info("app_stopped")
 
@@ -58,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(data_instruments_router, prefix="/api", tags=["data"])
     app.include_router(portfolio_router, prefix="/api/portfolio", tags=["portfolio"])
     app.include_router(models_router, prefix="/api/models", tags=["models"])
+    app.include_router(scheduling_router, prefix="/api/scheduling", tags=["scheduling"])
 
     # Static serving of the built frontend (created in T18; tolerated if missing)
     static_dir = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"

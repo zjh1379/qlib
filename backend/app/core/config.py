@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     default_experiment: str = "daily_cn_fresh"
     default_chart_window_days: int = 365
 
+    # Retrain / rolling-ensemble subprocess settings
+    retrain_recorder_experiment: str = "rolling_v2_ensemble"
+    retrain_python_path: str = "F:/Tools/Anaconda/envs/qlib/python.exe"
+
     @property
     def db_url(self) -> str:
         path = Path(self.app_db_path).expanduser().resolve()
