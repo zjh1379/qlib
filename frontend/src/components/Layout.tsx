@@ -11,6 +11,8 @@ export default function Layout() {
         </Link>
         <nav className="flex gap-4 text-sm flex-shrink-0">
           <NavLink to="/">Dashboard</NavLink>
+          <NavLink to="/picks">选股</NavLink>
+          <NavLink to="/portfolio">持仓</NavLink>
         </nav>
         <div className="flex-1 max-w-md ml-auto">
           <SymbolSearch size="sm" placeholder="搜索股票…" />

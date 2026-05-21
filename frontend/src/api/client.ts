@@ -82,4 +82,59 @@ export const api = {
     type R = paths['/api/instruments']['get']['responses']['200']['content']['application/json'];
     return request<R>(`/api/instruments?market=${encodeURIComponent(market)}`);
   },
+  portfolio: {
+    holdings: () => {
+      type R =
+        paths['/api/portfolio/holdings']['get']['responses']['200']['content']['application/json'];
+      return request<R>('/api/portfolio/holdings');
+    },
+    listTransactions: (params: { symbol?: string; from?: string; to?: string } = {}) => {
+      type R =
+        paths['/api/portfolio/transactions']['get']['responses']['200']['content']['application/json'];
+      const q = new URLSearchParams();
+      if (params.symbol) q.set('symbol', params.symbol);
+      if (params.from) q.set('from', params.from);
+      if (params.to) q.set('to', params.to);
+      const qs = q.toString();
+      return request<R>(`/api/portfolio/transactions${qs ? '?' + qs : ''}`);
+    },
+    addTransaction: (
+      body: paths['/api/portfolio/transactions']['post']['requestBody']['content']['application/json'],
+    ) => {
+      type R =
+        paths['/api/portfolio/transactions']['post']['responses']['200']['content']['application/json'];
+      return request<R>('/api/portfolio/transactions', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    },
+    deleteTransaction: (id: number) =>
+      fetch(`${BASE}/api/portfolio/transactions/${id}`, { method: 'DELETE' }).then((r) => {
+        if (!r.ok && r.status !== 204) throw new Error(`delete failed: ${r.status}`);
+      }),
+  },
+  models: {
+    screen: (params: { top?: number; days?: number; min_top?: number; experiment?: string } = {}) => {
+      type R = paths['/api/models/screen']['get']['responses']['200']['content']['application/json'];
+      const q = new URLSearchParams();
+      if (params.top !== undefined) q.set('top', String(params.top));
+      if (params.days !== undefined) q.set('days', String(params.days));
+      if (params.min_top !== undefined) q.set('min_top', String(params.min_top));
+      if (params.experiment) q.set('experiment', params.experiment);
+      const qs = q.toString();
+      return request<R>(`/api/models/screen${qs ? '?' + qs : ''}`);
+    },
+    predictions: (symbol: string, params: { days?: number; experiment?: string } = {}) => {
+      type R = paths['/api/models/predictions/{symbol}']['get']['responses']['200']['content']['application/json'];
+      const q = new URLSearchParams();
+      if (params.days !== undefined) q.set('days', String(params.days));
+      if (params.experiment) q.set('experiment', params.experiment);
+      const qs = q.toString();
+      return request<R>(`/api/models/predictions/${encodeURIComponent(symbol)}${qs ? '?' + qs : ''}`);
+    },
+    experiments: () => {
+      type R = paths['/api/models/experiments']['get']['responses']['200']['content']['application/json'];
+      return request<R>('/api/models/experiments');
+    },
+  },
 };
