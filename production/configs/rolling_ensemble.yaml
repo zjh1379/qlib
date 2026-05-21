@@ -35,7 +35,7 @@ models:
     enabled: true
   - id: tra
     config: production/configs/tra_alpha360.yaml
-    enabled: false   # flipped to true in Task 15
+    enabled: true
 
 post_process:
   ewma_alpha: 0.5
