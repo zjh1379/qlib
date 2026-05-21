@@ -133,11 +133,19 @@ export const api = {
       const qs = q.toString();
       return request<R>(`/api/models/screen${qs ? '?' + qs : ''}`);
     },
-    predictions: (symbol: string, params: { days?: number; experiment?: string } = {}) => {
+    predictions: (
+      symbol: string,
+      params: {
+        days?: number;
+        experiment?: string;
+        view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
+      } = {},
+    ) => {
       type R = paths['/api/models/predictions/{symbol}']['get']['responses']['200']['content']['application/json'];
       const q = new URLSearchParams();
       if (params.days !== undefined) q.set('days', String(params.days));
       if (params.experiment) q.set('experiment', params.experiment);
+      if (params.view) q.set('view', params.view);
       const qs = q.toString();
       return request<R>(`/api/models/predictions/${encodeURIComponent(symbol)}${qs ? '?' + qs : ''}`);
     },

@@ -27,6 +27,7 @@ class PredictionPoint(BaseModel):
     score: float
     rank: int                       # cross-sectional rank that day (1-based)
     universe_size: int
+    base_scores: dict[str, float] = Field(default_factory=dict)
 
 
 class PredictionHistory(BaseModel):

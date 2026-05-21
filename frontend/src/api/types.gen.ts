@@ -582,6 +582,10 @@ export interface components {
             rank: number;
             /** Universe Size */
             universe_size: number;
+            /** Base Scores */
+            base_scores?: {
+                [key: string]: number;
+            };
         };
         /** ProgressInfo */
         ProgressInfo: {
@@ -1289,6 +1293,7 @@ export interface operations {
             query?: {
                 days?: number;
                 experiment?: string | null;
+                view?: string;
             };
             header?: never;
             path: {

@@ -31,8 +31,11 @@ def predictions(
     symbol: str,
     days: int = Query(default=60, ge=1, le=365),
     experiment: str | None = Query(default=None),
+    view: str = Query(default="ensemble", pattern="^(ensemble|lightgbm|alstm|tra)$"),
 ):
-    return service.prediction_history(symbol=symbol, days=days, experiment=experiment)
+    return service.prediction_history(
+        symbol=symbol, days=days, experiment=experiment, view=view
+    )
 
 
 @router.get("/experiments", response_model=ExperimentsResponse)

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createChart, type IChartApi, type ISeriesApi } from 'lightweight-charts';
+import { createChart, type IChartApi, type ISeriesApi, type Time } from 'lightweight-charts';
+import { useQuery } from '@tanstack/react-query';
+import { api, ApiError } from '@/api/client';
 import { cn } from '@/lib/utils';
 
 export interface CandleBar {
@@ -37,6 +39,28 @@ const MA60_COLOR = '#fb923c';
 const VOL_UP = 'rgba(38,166,154,0.4)';
 const VOL_DN = 'rgba(239,83,80,0.4)';
 
+// Per-model overlay line colors (LGBM / ALSTM / TRA)
+const LGBM_COLOR = '#26a69a';
+const ALSTM_COLOR = '#3b82f6';
+const TRA_COLOR = '#a78bfa';
+
+const LGBM_COLS = ['lgbm_1d', 'lgbm_5d', 'lgbm_20d'];
+const ALSTM_COLS = ['alstm_1d', 'alstm_5d', 'alstm_20d'];
+const TRA_COLS = ['tra_1d', 'tra_5d', 'tra_20d'];
+
+type OverlayKey = 'lgbm' | 'alstm' | 'tra';
+
+function avgFromBaseScores(
+  baseScores: Record<string, number> | undefined,
+  cols: string[],
+): number | null {
+  if (!baseScores) return null;
+  const present = cols.filter(c => c in baseScores);
+  if (present.length === 0) return null;
+  const sum = present.reduce((s, c) => s + baseScores[c], 0);
+  return sum / present.length;
+}
+
 function sma(values: number[], window: number): (number | null)[] {
   const out: (number | null)[] = [];
   let sum = 0;
@@ -56,6 +80,11 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
   const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ma60SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const overlaySeriesRef = useRef<Record<OverlayKey, ISeriesApi<'Line'> | null>>({
+    lgbm: null,
+    alstm: null,
+    tra: null,
+  });
 
   const [showActual, setShowActual] = useState(true);
   const [showPred, setShowPred] = useState(true);
@@ -63,6 +92,50 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
   const [showMA60, setShowMA60] = useState(true);
   const [showVolume, setShowVolume] = useState(true);
   const [opacity, setOpacity] = useState(40);
+  const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({
+    lgbm: false,
+    alstm: false,
+    tra: false,
+  });
+
+  const anyOverlayOn = overlays.lgbm || overlays.alstm || overlays.tra;
+
+  // Fetch per-symbol prediction history (with base_scores) only when an
+  // overlay is enabled — keeps the chart cheap by default.
+  const { data: predHistory } = useQuery({
+    queryKey: ['predictions', symbol],
+    queryFn: () => api.models.predictions(symbol, { days: 365 }),
+    enabled: !!symbol && anyOverlayOn,
+    staleTime: 5 * 60_000,
+    retry: (count, err) => (err instanceof ApiError && err.status === 404 ? false : count < 2),
+  });
+
+  const overlayData = useMemo(() => {
+    const empty = { lgbm: [], alstm: [], tra: [] } as Record<
+      OverlayKey,
+      { time: Time; value: number }[]
+    >;
+    if (!predHistory?.points) return empty;
+    const builders: Record<OverlayKey, string[]> = {
+      lgbm: LGBM_COLS,
+      alstm: ALSTM_COLS,
+      tra: TRA_COLS,
+    };
+    const out: Record<OverlayKey, { time: Time; value: number }[]> = {
+      lgbm: [],
+      alstm: [],
+      tra: [],
+    };
+    for (const p of predHistory.points) {
+      for (const key of ['lgbm', 'alstm', 'tra'] as const) {
+        const v = avgFromBaseScores(p.base_scores, builders[key]);
+        if (v !== null) {
+          out[key].push({ time: p.date as Time, value: v });
+        }
+      }
+    }
+    return out;
+  }, [predHistory]);
 
   // Build predicted bar dataset incl. forecast, with per-bar coloring derived from `score`.
   const styledPredBars = useMemo(() => {
@@ -147,6 +220,33 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
       color: VOL_UP,
     });
 
+    // Per-model overlays live on a dedicated price scale so their small score
+    // magnitudes (~0.01–0.20) don't get crushed by candle prices.
+    overlaySeriesRef.current.lgbm = chart.addLineSeries({
+      color: LGBM_COLOR,
+      lineWidth: 1,
+      priceScaleId: 'overlays',
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: 'LGBM',
+    });
+    overlaySeriesRef.current.alstm = chart.addLineSeries({
+      color: ALSTM_COLOR,
+      lineWidth: 1,
+      priceScaleId: 'overlays',
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: 'ALSTM',
+    });
+    overlaySeriesRef.current.tra = chart.addLineSeries({
+      color: TRA_COLOR,
+      lineWidth: 1,
+      priceScaleId: 'overlays',
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: 'TRA',
+    });
+
     // Reserve bottom 15% for volume, keep candles in upper 80%.
     chart.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.85, bottom: 0 },
@@ -154,6 +254,11 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
     });
     chart.priceScale('right').applyOptions({
       scaleMargins: { top: 0.05, bottom: 0.2 },
+    });
+    chart.priceScale('overlays').applyOptions({
+      scaleMargins: { top: 0.05, bottom: 0.2 },
+      borderVisible: false,
+      visible: false,
     });
 
     return () => {
@@ -164,6 +269,7 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
       ma20SeriesRef.current = null;
       ma60SeriesRef.current = null;
       volumeSeriesRef.current = null;
+      overlaySeriesRef.current = { lgbm: null, alstm: null, tra: null };
     };
   }, []);
 
@@ -213,6 +319,21 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
     predSeriesRef.current?.applyOptions({ visible: showPred });
   }, [showPred]);
 
+  // Sync per-model overlay line series — data + visibility
+  useEffect(() => {
+    (['lgbm', 'alstm', 'tra'] as const).forEach(key => {
+      const series = overlaySeriesRef.current[key];
+      if (!series) return;
+      series.setData(overlays[key] ? overlayData[key] : []);
+      series.applyOptions({ visible: overlays[key] });
+    });
+    // Toggle the overlays price scale visibility off when nothing is enabled,
+    // so the right axis stays clean.
+    chartRef.current?.priceScale('overlays').applyOptions({
+      visible: overlays.lgbm || overlays.alstm || overlays.tra,
+    });
+  }, [overlays, overlayData]);
+
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-semibold">{symbol}</h2>
@@ -261,6 +382,33 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
             aria-label="成交量"
           />
           <span className="text-gray-400">成交量</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={overlays.lgbm}
+            onChange={e => setOverlays(o => ({ ...o, lgbm: e.target.checked }))}
+            aria-label="LightGBM"
+          />
+          <span style={{ color: LGBM_COLOR }}>LightGBM</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={overlays.alstm}
+            onChange={e => setOverlays(o => ({ ...o, alstm: e.target.checked }))}
+            aria-label="ALSTM"
+          />
+          <span style={{ color: ALSTM_COLOR }}>ALSTM</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={overlays.tra}
+            onChange={e => setOverlays(o => ({ ...o, tra: e.target.checked }))}
+            aria-label="TRA"
+          />
+          <span style={{ color: TRA_COLOR }}>TRA</span>
         </label>
         <div className="flex items-center gap-2">
           <span aria-hidden="true">预测</span>

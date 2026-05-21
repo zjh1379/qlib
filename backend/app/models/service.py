@@ -171,38 +171,89 @@ def screen(
     }
 
 
-def prediction_history(symbol: str, days: int = 60, experiment: str | None = None) -> dict:
-    """Return score + rank history for a single symbol."""
+def prediction_history(
+    symbol: str,
+    days: int = 60,
+    experiment: str | None = None,
+    view: str = "ensemble",
+) -> dict:
+    """Return score + rank history for a single symbol.
+
+    When `view` is not "ensemble", the unified `score` column is overridden
+    with the row-wise mean of the per-model base columns matching that view's
+    prefix (lightgbm -> lgbm_*, alstm -> alstm_*, tra -> tra_*). Each point's
+    `base_scores` dict carries the per-base-column raw values for that day.
+    """
     init_qlib_once()
     s = Settings()
     exp = experiment or s.default_experiment
     recorder_id = get_latest_recorder_id(exp)
     pred = load_pred(recorder_id, experiment_name=exp)
-    if isinstance(pred, pd.DataFrame):
-        pred = pred["score"]
 
-    if symbol not in pred.index.get_level_values(1).unique():
+    # Normalize to a DataFrame with a `score` column. Keep extra columns
+    # (consensus, base scores) if the new pred.pkl shape provides them.
+    if isinstance(pred, pd.Series):
+        df = pred.to_frame(name="score")
+    else:
+        df = pred.copy()
+        if "score" not in df.columns:
+            if df.shape[1] == 1:
+                df = df.rename(columns={df.columns[0]: "score"})
+            else:
+                raise ValueError("pred frame missing 'score' column")
+
+    # Normalize index names
+    if df.index.names != ["datetime", "instrument"]:
+        df.index = df.index.set_names(["datetime", "instrument"])
+
+    if symbol not in df.index.get_level_values("instrument").unique():
         raise NotFoundError(
             f"no predictions for {symbol} in experiment {exp}",
             code="symbol_missing",
             context={"symbol": symbol, "experiment": exp},
         )
 
-    dates = pred.index.get_level_values(0).unique().sort_values()
+    # Override score for per-model views (same prefix map as screen())
+    _view_prefix = {"lightgbm": "lgbm_", "alstm": "alstm_", "tra": "tra_"}
+    if view in _view_prefix:
+        prefix = _view_prefix[view]
+        view_cols = [c for c in df.columns if c.startswith(prefix)]
+        if view_cols:
+            df = df.copy()
+            df["score"] = df[view_cols].mean(axis=1)
+        # else: silently fall through to ensemble score (old-shape pred.pkl)
+
+    # Identify base columns for the per-point base_scores dict
+    reserved = {"score", "consensus"}
+    base_cols = [c for c in df.columns if c not in reserved]
+
+    dates = df.index.get_level_values("datetime").unique().sort_values()
     window_dates = dates[-days:]
-    window = pred.loc[window_dates[0]:window_dates[-1]]
-    daily_rank = window.groupby(level=0).rank(ascending=False, method="min")
-    sym_scores = window.xs(symbol, level=1).sort_index()
-    sym_ranks = daily_rank.xs(symbol, level=1).sort_index()
-    universe_per_day = window.groupby(level=0).count()
+    window = df.loc[window_dates[0]:window_dates[-1]]
+
+    # Per-day rank uses the (possibly overridden) score column
+    daily_rank = (
+        window["score"].groupby(level="datetime").rank(ascending=False, method="min")
+    )
+    universe_per_day = window["score"].groupby(level="datetime").count()
+
+    # Slice to the requested symbol
+    sym_window = window.xs(symbol, level="instrument").sort_index()
+    sym_ranks = daily_rank.xs(symbol, level="instrument").sort_index()
 
     points = []
-    for d in sym_scores.index:
+    for d, row in sym_window.iterrows():
+        base_scores = {
+            c: float(row[c])
+            for c in base_cols
+            if c in row.index and pd.notna(row[c])
+        }
         points.append({
             "date": str(d.date()),
-            "score": float(sym_scores.loc[d]),
+            "score": float(row["score"]),
             "rank": int(sym_ranks.loc[d]),
             "universe_size": int(universe_per_day.loc[d]),
+            "base_scores": base_scores,
         })
 
     name_map = _name_map()
