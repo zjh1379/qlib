@@ -1,0 +1,42 @@
+# ALSTM-Alpha360 hyperparameters (locked per spec §5).
+# β simplification: trains qlib's stock single-output ALSTM 3× per weekly run
+# (once per horizon). True label-multi-head sharing is a γ optimization.
+
+model:
+  class: ALSTM
+  module_path: qlib.contrib.model.pytorch_alstm_ts
+  kwargs:
+    d_feat: 6
+    hidden_size: 64
+    num_layers: 2
+    dropout: 0.0
+    n_epochs: 100
+    lr: 0.001
+    early_stop: 20
+    batch_size: 2048
+    metric: "loss"
+    loss: "mse"
+    GPU: 0
+    seed: 0
+
+handler:
+  class: Alpha360_OpenH
+  module_path: custom_handler
+  # learn_processors and infer_processors are merged into handler kwargs at
+  # runtime by _build_multihead_dataset in train_alstm.py.
+
+learn_processors:
+  - class: DropnaLabel
+
+infer_processors:
+  - class: RobustZScoreNorm
+    kwargs:
+      fields_group: feature
+      clip_outlier: true
+  - class: Fillna
+    kwargs:
+      fields_group: feature
+
+step_len: 20
+
+grad_clip_max_norm: 3.0
