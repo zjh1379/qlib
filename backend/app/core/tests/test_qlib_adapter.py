@@ -1,0 +1,99 @@
+import pytest
+import pandas as pd
+from app.core.qlib_adapter import (
+    init_qlib_once,
+    get_ohlcv,
+    get_calendar_end,
+    get_calendar_info,
+    get_csi300_instruments,
+    get_csi300_with_names,
+    load_pred,
+    get_latest_recorder_id,
+    next_trading_days,
+)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _init_qlib():
+    init_qlib_once()
+
+
+def test_get_csi300_returns_300ish():
+    instruments = get_csi300_instruments()
+    assert 200 <= len(instruments) <= 350
+    assert all(s.startswith(("SH", "SZ")) for s in instruments)
+
+
+def test_get_calendar_end_is_after_2025():
+    end = get_calendar_end()
+    assert end.year >= 2025
+
+
+def test_get_ohlcv_returns_dataframe():
+    end = get_calendar_end()
+    df = get_ohlcv(["SH600519"], start="2025-01-01", end=str(end))
+    assert isinstance(df, pd.DataFrame)
+    assert {"$open", "$high", "$low", "$close", "$volume"}.issubset(df.columns)
+    assert len(df) > 100
+
+
+def test_load_pred_returns_series():
+    rid = get_latest_recorder_id("daily_cn_fresh")
+    pred = load_pred(rid)
+    assert isinstance(pred, pd.Series)
+    assert pred.index.nlevels == 2  # (datetime, instrument)
+    assert len(pred) > 1000
+
+
+def test_init_is_idempotent():
+    init_qlib_once()
+    init_qlib_once()  # second call should be a no-op, not raise
+
+
+def test_init_raises_when_mlruns_missing(tmp_path, monkeypatch):
+    """init_qlib_once must raise DependencyError(mlruns_missing) when mlruns dir doesn't exist."""
+    from app.core import qlib_adapter
+    from app.core.exceptions import DependencyError
+
+    # reset module-level init flag so we can re-init
+    qlib_adapter._initialized = False
+
+    monkeypatch.setenv("QLIB_COMPANION_MLRUNS_DIR", str(tmp_path / "does_not_exist"))
+    with pytest.raises(DependencyError) as excinfo:
+        qlib_adapter.init_qlib_once()
+    assert excinfo.value.code == "mlruns_missing"
+
+    # restore for downstream tests
+    qlib_adapter._initialized = False
+    monkeypatch.undo()
+    qlib_adapter.init_qlib_once()
+
+
+def test_get_calendar_info_returns_date_and_size():
+    end, size = get_calendar_info()
+    assert end.year >= 2025
+    assert size > 100
+
+
+def test_get_csi300_with_names_includes_known_symbol():
+    items = get_csi300_with_names()
+    assert isinstance(items, list)
+    assert len(items) >= 200
+    assert all(set(d.keys()) == {"symbol", "name"} for d in items)
+    # at least one well-known symbol should have a non-empty Chinese name
+    assert any(d["name"] for d in items)
+
+
+def test_next_trading_days_returns_n_future_days():
+    """next_trading_days(after, n=2) returns up to 2 trading days strictly after anchor."""
+    end = get_calendar_end()
+    # Use a date well before calendar end to ensure we have future days
+    anchor = pd.Timestamp("2025-04-01")
+    result = next_trading_days(anchor, n=2)
+    assert isinstance(result, list)
+    assert len(result) <= 2
+    assert all(isinstance(d, pd.Timestamp) for d in result)
+    assert all(d > anchor for d in result)
+    if len(result) >= 2:
+        # verify they are in chronological order
+        assert result[0] < result[1]

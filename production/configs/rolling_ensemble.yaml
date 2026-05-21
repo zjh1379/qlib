@@ -1,0 +1,45 @@
+# Top-level config consumed by production/rolling_train.py.
+
+experiment_name: rolling_v2_ensemble
+
+universe: csi800   # CSI300 + CSI500 PIT union
+provider_uri: ~/.qlib/qlib_data/cn_data_bs
+region: cn
+
+horizons:
+  - name: "1d"
+    horizon_days: 1
+    train_years: 3
+    valid_years: 1
+    stack_years: 1
+    test_weeks: 1
+  - name: "5d"
+    horizon_days: 5
+    train_years: 5
+    valid_years: 1
+    stack_years: 1
+    test_weeks: 1
+  - name: "20d"
+    horizon_days: 20
+    train_years: 7
+    valid_years: 1
+    stack_years: 1
+    test_weeks: 1
+
+models:
+  - id: lgbm
+    config: production/configs/lgbm_alpha158_multi.yaml
+    enabled: true
+  - id: alstm
+    config: production/configs/alstm_alpha360.yaml
+    enabled: true
+  - id: tra
+    config: production/configs/tra_alpha360.yaml
+    enabled: true
+
+post_process:
+  ewma_alpha: 0.5
+  cost_bps: 10
+
+mlruns_archive:
+  keep_weeks: 8

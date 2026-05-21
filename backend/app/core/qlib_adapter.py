@@ -1,0 +1,240 @@
+from datetime import date
+from pathlib import Path
+from threading import Lock
+
+import pandas as pd
+import qlib
+from qlib.constant import REG_CN, REG_US
+from qlib.data import D
+from qlib.workflow import R
+
+from app.core.config import Settings
+from app.core.exceptions import DependencyError, NotFoundError
+from app.core.logging import get_logger
+
+_log = get_logger("qlib_adapter")
+_initialized = False
+_lock = Lock()
+
+
+def _resolve_mlruns_uri(settings: Settings) -> str:
+    """Return a file:// URI for the mlruns directory. Raises DependencyError if missing."""
+    path = settings.mlruns_path
+    if not path.is_dir():
+        raise DependencyError(
+            f"mlruns directory not found at {path}",
+            code="mlruns_missing",
+            context={"path": str(path)},
+        )
+    return f"file:{path}"
+
+
+def init_qlib_once(settings: Settings | None = None) -> None:
+    """Idempotent qlib.init. Safe to call from many places."""
+    global _initialized
+    with _lock:
+        if _initialized:
+            return
+        s = settings or Settings()
+        region = REG_CN if s.qlib_region == "cn" else REG_US
+        provider_uri = str(s.qlib_data_dir)
+        if not Path(provider_uri).is_dir():
+            raise DependencyError(
+                f"qlib data not found at {provider_uri}",
+                code="qlib_data_missing",
+                context={"path": provider_uri},
+            )
+        mlruns_uri = _resolve_mlruns_uri(s)
+        qlib.init(
+            provider_uri=provider_uri,
+            region=region,
+            exp_manager={
+                "class": "MLflowExpManager",
+                "module_path": "qlib.workflow.expm",
+                "kwargs": {
+                    "uri": mlruns_uri,
+                    "default_exp_name": "Experiment",
+                },
+            },
+        )
+        _initialized = True
+        _log.info(
+            "qlib_init_done",
+            provider_uri=provider_uri,
+            region=s.qlib_region,
+            mlruns_uri=mlruns_uri,
+        )
+
+
+def get_ohlcv(symbols: list[str], start: str, end: str, freq: str = "day") -> pd.DataFrame:
+    """Return MultiIndex DataFrame (datetime x instrument) with columns $open/$high/$low/$close/$volume/$factor."""
+    init_qlib_once()
+    fields = ["$open", "$high", "$low", "$close", "$volume", "$factor"]
+    df = D.features(instruments=symbols, fields=fields, start_time=start, end_time=end, freq=freq)
+    if df is None or df.empty:
+        raise NotFoundError(
+            f"no ohlcv for {symbols} between {start} and {end}",
+            code="ohlcv_empty",
+            context={"symbols": symbols, "start": start, "end": end},
+        )
+    return df
+
+
+def get_calendar_end() -> date:
+    init_qlib_once()
+    cal = D.calendar(freq="day")
+    if not len(cal):
+        raise DependencyError("empty trading calendar", code="calendar_empty")
+    return pd.Timestamp(cal[-1]).date()
+
+
+def next_trading_days(after: str | pd.Timestamp, n: int = 2) -> list[pd.Timestamp]:
+    """Return up to `n` trading days strictly after `after` (a date string or Timestamp)."""
+    init_qlib_once()
+    anchor = pd.Timestamp(after)
+    cal = D.calendar(start_time=anchor, end_time=anchor + pd.Timedelta(days=10 + n * 3))
+    return [pd.Timestamp(d) for d in cal if pd.Timestamp(d) > anchor][:n]
+
+
+def get_csi300_instruments() -> list[str]:
+    """Compatibility wrapper. Prefer get_instruments_for_market('csi300')."""
+    init_qlib_once()
+    inst_dict = D.instruments("csi300")
+    inst_list = D.list_instruments(instruments=inst_dict, as_list=True)
+    return sorted(inst_list)
+
+
+def get_instruments_for_market(market: str) -> list[str]:
+    """Read instruments/{market}.txt from qlib_dir and return symbols (uppercase qlib format).
+
+    Falls back to empty list if the file doesn't exist.
+    """
+    init_qlib_once()
+    s = Settings()
+    f = s.qlib_data_dir / "instruments" / f"{market}.txt"
+    if not f.is_file():
+        return []
+    out = []
+    for line in f.read_text(encoding="utf-8").splitlines():
+        sym = line.split("\t")[0].strip()
+        if sym and not sym.startswith("#"):
+            out.append(sym)
+    return out
+
+
+def get_calendar_info() -> tuple[date, int]:
+    """Return (last_trading_day, total_calendar_size) for the configured market."""
+    init_qlib_once()
+    cal = D.calendar(freq="day")
+    if not len(cal):
+        raise DependencyError("empty trading calendar", code="calendar_empty")
+    return pd.Timestamp(cal[-1]).date(), int(len(cal))
+
+
+def get_market_with_names(market: str) -> list[dict]:
+    """Like get_csi300_with_names but for any market. Returns [{symbol, name}, ...]."""
+    import json
+    init_qlib_once()
+    symbols = get_instruments_for_market(market)
+
+    # qlib_adapter.py -> core/ -> app/ -> backend/ -> <repo root>
+    project_root = Path(__file__).resolve().parents[3]
+    cache_path = project_root / "production" / "cn_names_cache.json"
+    name_map: dict[str, str] = {}
+    if cache_path.is_file():
+        try:
+            blob = json.loads(cache_path.read_text(encoding="utf-8"))
+            raw = blob.get("map", {}) or {}
+            for sym in symbols:
+                bare = sym[2:] if sym.startswith(("SH", "SZ")) else sym
+                name_map[sym] = raw.get(bare, "")
+        except Exception:
+            pass
+
+    # ETF names: fall back to production/etf_names.json since cn_names_cache is A-share only.
+    etf_names_path = project_root / "production" / "etf_names.json"
+    if etf_names_path.is_file():
+        try:
+            etf_map = json.loads(etf_names_path.read_text(encoding="utf-8"))
+            for sym in symbols:
+                if not name_map.get(sym):
+                    name_map[sym] = etf_map.get(sym, "")
+        except Exception:
+            pass
+
+    return [{"symbol": sym, "name": name_map.get(sym, "")} for sym in symbols]
+
+
+def get_csi300_with_names() -> list[dict]:
+    """Returns [{symbol, name}] for CSI300 with Chinese names from production cache file."""
+    return get_market_with_names("csi300")
+
+
+def list_available_markets() -> list[dict]:
+    """Scan instruments/ dir for *.txt files. Return [{name, count, label}, ...]."""
+    init_qlib_once()
+    s = Settings()
+    inst_dir = s.qlib_data_dir / "instruments"
+    if not inst_dir.is_dir():
+        return []
+    # Label map; unknown markets get name as label
+    labels = {
+        "csi300": "沪深300",
+        "csi500": "中证500",
+        "etfs": "热门ETF",
+        "custom": "自定义",
+        "all": "全部",
+    }
+    out = []
+    for txt in sorted(inst_dir.glob("*.txt")):
+        name = txt.stem
+        if name == "all":
+            continue  # exclude the union meta file from user-facing list
+        try:
+            with txt.open("r", encoding="utf-8") as fh:
+                count = sum(1 for ln in fh if ln.strip())
+        except Exception:
+            count = 0
+        out.append({"name": name, "label": labels.get(name, name), "count": count})
+    return out
+
+
+def get_latest_recorder_id(experiment_name: str) -> str:
+    init_qlib_once()
+    try:
+        exp = R.get_exp(experiment_name=experiment_name)
+    except Exception as e:
+        raise NotFoundError(
+            f"experiment '{experiment_name}' not found",
+            code="experiment_missing",
+            context={"name": experiment_name},
+        ) from e
+    recs = exp.list_recorders()
+    if not recs:
+        raise NotFoundError(
+            f"no recorders in experiment '{experiment_name}'",
+            code="no_recorders",
+            context={"experiment": experiment_name},
+        )
+    for rid in sorted(recs, key=lambda k: recs[k].info["start_time"], reverse=True):
+        try:
+            r = exp.get_recorder(recorder_id=rid)
+            r.load_object("pred.pkl")
+            return rid
+        except Exception:
+            continue
+    raise NotFoundError(
+        f"no recorder with pred.pkl in '{experiment_name}'",
+        code="no_pred_pkl",
+        context={"experiment": experiment_name},
+    )
+
+
+def load_pred(recorder_id: str, experiment_name: str = "daily_cn_fresh") -> pd.Series:
+    init_qlib_once()
+    exp = R.get_exp(experiment_name=experiment_name)
+    rec = exp.get_recorder(recorder_id=recorder_id)
+    pred = rec.load_object("pred.pkl")
+    if isinstance(pred, pd.DataFrame):
+        pred = pred["score"]
+    return pred
