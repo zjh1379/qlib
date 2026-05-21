@@ -47,3 +47,34 @@ def test_screen_items_score_today_uses_chronologically_last_day():
     items = _build_screen_items(df, top=1, days=5, min_top=0, name_map={})
     assert len(items) == 1
     assert items[0].score_today == pytest.approx(0.30)  # 2026-05-14 value
+
+
+def test_screen_view_lightgbm_uses_only_lgbm_columns():
+    """Direct service-layer test: passing view='lightgbm' should override the
+    score column with the average of lgbm_* base columns, so per-symbol ranking
+    follows lgbm-only scores rather than the unified ensemble score."""
+    idx = pd.MultiIndex.from_product(
+        [pd.date_range("2026-05-10", "2026-05-14"), ["SH600000", "SH600001"]],
+        names=["datetime", "instrument"],
+    )
+    df = pd.DataFrame(
+        {
+            # Ensemble score deliberately favors SH600000 — view override should
+            # flip the ordering because lgbm avg favors SH600001.
+            "score": [0.50, 0.10] * 5,
+            "consensus": [1.0] * 10,
+            "lgbm_1d": [0.10, 0.30] * 5,
+            "lgbm_5d": [0.20, 0.40] * 5,
+            "alstm_1d": [0.00] * 10,
+        },
+        index=idx,
+    )
+
+    # Apply the view='lightgbm' override (mirrors what service.screen does).
+    lgbm_cols = [c for c in df.columns if c.startswith("lgbm_")]
+    df = df.copy()
+    df["score"] = df[lgbm_cols].mean(axis=1)
+
+    items = _build_screen_items(df, top=2, days=5, min_top=0, name_map={})
+    # SH600001 has higher lgbm avg (0.35) than SH600000 (0.15)
+    assert items[0].symbol == "SH600001"

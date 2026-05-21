@@ -1,7 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/api/client';
 
-export function useScreen(params: { top?: number; days?: number; min_top?: number } = {}) {
+export function useScreen(
+  params: {
+    top?: number;
+    days?: number;
+    min_top?: number;
+    view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
+  } = {},
+) {
   return useQuery({
     queryKey: ['models', 'screen', params],
     queryFn: () => api.models.screen(params),

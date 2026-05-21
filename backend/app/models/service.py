@@ -93,10 +93,22 @@ def _build_screen_items(
     return items
 
 
-def screen(top: int = 30, days: int = 5, min_top: int = 0, experiment: str | None = None) -> dict:
+def screen(
+    top: int = 30,
+    days: int = 5,
+    min_top: int = 0,
+    experiment: str | None = None,
+    view: str = "ensemble",
+) -> dict:
     """
     Rank the model's universe by 'score_avg over last `days` days', then filter by
     'days_in_top >= min_top' if specified. Returns at most `top` items.
+
+    When `view` is not "ensemble", the unified `score` column is overridden with
+    the row-wise mean of the per-model base columns matching that view's prefix
+    (lightgbm -> lgbm_, alstm -> alstm_, tra -> tra_). Falls back to the
+    ensemble score if no matching base columns are present in the prediction
+    frame (e.g. old-shape pred.pkl).
     """
     init_qlib_once()
     s = Settings()
@@ -121,6 +133,23 @@ def screen(top: int = 30, days: int = 5, min_top: int = 0, experiment: str | Non
     # Ensure the index names match what _build_screen_items expects.
     if df.index.names != ["datetime", "instrument"]:
         df.index = df.index.set_names(["datetime", "instrument"])
+
+    # If a per-model view is requested, override `score` with the row-wise mean
+    # of the matching base columns. Map UI-friendly view names to the actual
+    # column prefix used in pred.pkl (lightgbm -> lgbm_*, etc.).
+    if view != "ensemble":
+        _view_prefix = {
+            "lightgbm": "lgbm_",
+            "alstm": "alstm_",
+            "tra": "tra_",
+        }
+        prefix = _view_prefix.get(view, f"{view}_")
+        view_cols = [c for c in df.columns if c.startswith(prefix)]
+        if view_cols:
+            df = df.copy()
+            df["score"] = df[view_cols].mean(axis=1)
+        # else: silently fall through to existing ensemble score (no per-model
+        # cols available — e.g. old-shape pred.pkl).
 
     # Compute universe_size and last_day from the prediction frame.
     dates = df.index.get_level_values("datetime").unique().sort_values()

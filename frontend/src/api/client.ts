@@ -114,13 +114,22 @@ export const api = {
       }),
   },
   models: {
-    screen: (params: { top?: number; days?: number; min_top?: number; experiment?: string } = {}) => {
+    screen: (
+      params: {
+        top?: number;
+        days?: number;
+        min_top?: number;
+        experiment?: string;
+        view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
+      } = {},
+    ) => {
       type R = paths['/api/models/screen']['get']['responses']['200']['content']['application/json'];
       const q = new URLSearchParams();
       if (params.top !== undefined) q.set('top', String(params.top));
       if (params.days !== undefined) q.set('days', String(params.days));
       if (params.min_top !== undefined) q.set('min_top', String(params.min_top));
       if (params.experiment) q.set('experiment', params.experiment);
+      if (params.view) q.set('view', params.view);
       const qs = q.toString();
       return request<R>(`/api/models/screen${qs ? '?' + qs : ''}`);
     },

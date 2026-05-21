@@ -1219,6 +1219,7 @@ export interface operations {
                 days?: number;
                 min_top?: number;
                 experiment?: string | null;
+                view?: string;
             };
             header?: never;
             path?: never;

@@ -17,8 +17,11 @@ def screen(
     days: int = Query(default=5, ge=1, le=60),
     min_top: int = Query(default=0, ge=0),
     experiment: str | None = Query(default=None),
+    view: str = Query(default="ensemble", pattern="^(ensemble|lightgbm|alstm|tra)$"),
 ):
-    return service.screen(top=top, days=days, min_top=min_top, experiment=experiment)
+    return service.screen(
+        top=top, days=days, min_top=min_top, experiment=experiment, view=view
+    )
 
 
 @router.get("/predictions/{symbol}", response_model=PredictionHistory)
