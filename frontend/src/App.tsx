@@ -5,6 +5,7 @@ import Dashboard from '@/pages/Dashboard';
 import Picks from '@/pages/Picks';
 import Portfolio from '@/pages/Portfolio';
 import PortfolioTransactions from '@/pages/PortfolioTransactions';
+import Settings from '@/pages/Settings';
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/picks" element={<Picks />} />
         <Route path="/portfolio" element={<Portfolio />} />
         <Route path="/portfolio/transactions" element={<PortfolioTransactions />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
   );

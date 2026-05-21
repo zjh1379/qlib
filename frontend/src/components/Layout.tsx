@@ -13,6 +13,7 @@ export default function Layout() {
           <NavLink to="/">Dashboard</NavLink>
           <NavLink to="/picks">选股</NavLink>
           <NavLink to="/portfolio">持仓</NavLink>
+          <NavLink to="/settings">设置</NavLink>
         </nav>
         <div className="flex-1 max-w-md ml-auto">
           <SymbolSearch size="sm" placeholder="搜索股票…" />

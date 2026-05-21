@@ -245,6 +245,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scheduling/retrain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Schedule */
+        get: operations["get_schedule_api_scheduling_retrain_get"];
+        /** Put Schedule */
+        put: operations["put_schedule_api_scheduling_retrain_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scheduling/retrain/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Now */
+        post: operations["run_now_api_scheduling_retrain_run_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/{full_path}": {
         parameters: {
             query?: never;
@@ -564,6 +599,44 @@ export interface components {
             started_at: string;
             /** Message */
             message: string;
+        };
+        /** RetrainScheduleRead */
+        RetrainScheduleRead: {
+            /**
+             * Day Of Week
+             * @description 0=Mon, 6=Sun
+             */
+            day_of_week: number;
+            /** Hour */
+            hour: number;
+            /** Minute */
+            minute: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Last Run At */
+            last_run_at: string | null;
+            /** Next Run At */
+            next_run_at: string | null;
+        };
+        /** RetrainScheduleUpdate */
+        RetrainScheduleUpdate: {
+            /** Day Of Week */
+            day_of_week: number;
+            /** Hour */
+            hour: number;
+            /** Minute */
+            minute: number;
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** RunNowResponse */
+        RunNowResponse: {
+            /** Status */
+            status: string;
+            /** Reason */
+            reason?: string | null;
+            /** Job Id */
+            job_id?: string | null;
         };
         /** ScreenItem */
         ScreenItem: {
@@ -1176,6 +1249,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExperimentsResponse"];
+                };
+            };
+        };
+    };
+    get_schedule_api_scheduling_retrain_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrainScheduleRead"];
+                };
+            };
+        };
+    };
+    put_schedule_api_scheduling_retrain_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrainScheduleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrainScheduleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_now_api_scheduling_retrain_run_now_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunNowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

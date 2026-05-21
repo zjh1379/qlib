@@ -137,4 +137,25 @@ export const api = {
       return request<R>('/api/models/experiments');
     },
   },
+  scheduling: {
+    getRetrain: () => {
+      type R = paths['/api/scheduling/retrain']['get']['responses']['200']['content']['application/json'];
+      return request<R>('/api/scheduling/retrain');
+    },
+    putRetrain: (
+      body: paths['/api/scheduling/retrain']['put']['requestBody']['content']['application/json'],
+    ) => {
+      type R = paths['/api/scheduling/retrain']['put']['responses']['200']['content']['application/json'];
+      return request<R>('/api/scheduling/retrain', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+    },
+    runNow: (force = false) => {
+      type R =
+        paths['/api/scheduling/retrain/run-now']['post']['responses']['200']['content']['application/json'];
+      const q = new URLSearchParams({ force: String(force) });
+      return request<R>(`/api/scheduling/retrain/run-now?${q.toString()}`, { method: 'POST' });
+    },
+  },
 };
