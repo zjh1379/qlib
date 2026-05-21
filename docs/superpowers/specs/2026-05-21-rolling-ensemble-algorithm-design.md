@@ -158,8 +158,8 @@ P1.5 already shipped a working Picks page + data scope expansion. We now have da
 | Sequence length | 20 trading days |
 | Input dim | 6 (OHLC + volume + change) |
 | Hyperparameters | `hidden_size=64, num_layers=2, dropout=0.0, batch_size=2048, n_epochs=100, lr=1e-3, early_stop_patience=20` |
-| Multi-horizon | Single network, 3 output heads (multi-task loss = sum of 3 IC losses) |
-| Training time | RTX 3080Ti ~25 min |
+| Multi-horizon | **β phase: 3 independent ALSTM instances (one per horizon).** Spec target of "single network, 3 output heads" deferred to γ-phase optimization (qlib stock ALSTM is single-output; multi-task head sharing requires a model subclass). |
+| Training time | RTX 3080Ti ~8 min per horizon with `early_stop=20` (worst case 25 min). Total β ALSTM: 20–60 min serial. |
 | Single-model IC target | 0.030-0.040 |
 
 ### Model C · TRA-Alpha360
@@ -170,8 +170,8 @@ P1.5 already shipped a working Picks page + data scope expansion. We now have da
 | Feature handler | `qlib.contrib.data.handler.Alpha360` |
 | Sequence length | 20 trading days |
 | Hyperparameters | `hidden_size=64, num_states=10, lamb=1.0, transport_method=optimal-transport, batch_size=1024, n_epochs=100, lr=1e-3` |
-| Multi-horizon | Native multi-task (TRA design intent) |
-| Training time | RTX 3080Ti ~50 min |
+| Multi-horizon | **β phase: 3 independent TRA instances (one per horizon).** qlib's stock TRA is single-output (the "multi-task" refers to its internal K=10 state routing, not the label dimension). Multi-label head sharing deferred to γ. |
+| Training time | RTX 3080Ti ~15 min per horizon with `early_stop=20` (worst case 50 min). Total β TRA: 45–120 min serial. |
 | Single-model IC target | 0.035-0.045 |
 
 ### Why both ALSTM and TRA
@@ -200,20 +200,36 @@ They make different errors → ensemble diversity gain.
 ```
 T₀+00:00  ① Data integrity check (re-run incremental refresh)
 T₀+00:02  ② Build PIT training universe (CSI300 + CSI500 monthly snapshots)
-T₀+00:05  ③ Train base models (sequentially):
+T₀+00:05  ③ Train base models (sequentially, one head per horizon for β):
           ├─ LightGBM × 3 horizons     (15 min, CPU)
-          ├─ ALSTM multi-head          (25 min, GPU)
-          └─ TRA multi-head            (50 min, GPU)
-T₀+01:35  ④ Generate OOF base predictions on Stack-fit 1y window
-T₀+01:40  ⑤ Fit stacking Ridge meta-learner (<1 min, CPU)
-T₀+01:41  ⑥ Generate predictions for next week's test window
+          ├─ ALSTM × 3 horizons        (20–60 min, GPU, early stop p=20)
+          └─ TRA × 3 horizons          (45–120 min, GPU, early stop p=20)
+T₀+02:20  ④ Generate OOF base predictions on Stack-fit window
+T₀+02:25  ⑤ Fit stacking Ridge meta-learner (<1 min, CPU)
+T₀+02:26  ⑥ Generate predictions for next week's test window
           └─ EWMA post-processing
-T₀+01:45  ⑦ Backtest evaluation (8 metrics, multi-regime split)
-T₀+01:50  ⑧ Compare vs last-week model (paired t-test) → decide swap or hold
-T₀+01:55  ⑨ Write mlruns + invalidate /api/models cache
+T₀+02:30  ⑦ Backtest evaluation (8 metrics, multi-regime split)
+T₀+02:35  ⑧ Compare vs last-week model (paired t-test) → decide swap or hold
+T₀+02:40  ⑨ Write mlruns + invalidate /api/models cache
 ```
 
-Total: ~2 hours wall clock.
+**Wall-clock budget:**
+
+| Phase | Typical (early stop fires) | Worst case (full 100 epochs) |
+|---|---|---|
+| β (LightGBM + ALSTM + TRA, 3 horizons each) | **90–150 min** | **~4 hours** |
+| γ (β + MASTER) | 150–210 min | ~5 hours |
+
+The 2 hours quoted in earlier versions of this spec assumed a *single multi-head*
+network for each NN model. β intentionally ships with **one head per horizon**
+(qlib's stock `ALSTM` / `TRA` are single-output; multi-task head sharing is
+listed as a γ-phase optimization) — this multiplies NN wall-clock by ~3x but
+keeps the implementation straightforward and lets early stopping prune the
+slow cases. The schedule should leave **at least 4 hours of slack** before the
+next trading session begins.
+
+Total: 90 minutes typical, 4 hours hard ceiling. If a run exceeds 5 hours the
+pipeline aborts and keeps the previous week's model.
 
 ### Schedule configuration (in-app)
 
@@ -495,7 +511,7 @@ Total frontend effort: **~5 days** as P3.5 patch, parallel to or after β-phase 
 **Functional**
 
 - [ ] `production/rolling_train.py` runs end-to-end without manual intervention
-- [ ] Weekly APScheduler job triggers at user-configured time (default Sunday 22:00) and completes within 2 hours
+- [ ] Weekly APScheduler job triggers at user-configured time (default Sunday 22:00) and completes within the 4-hour hard ceiling (typically 90–150 min)
 - [ ] `/api/scheduling/retrain` GET/PUT works and rejects trading-hours slots
 - [ ] `pred.pkl` from latest ensemble recorder is consumed by Picks / Charts pages without code changes
 - [ ] All 3 base models trained; ALSTM and TRA use GPU; LightGBM uses CPU

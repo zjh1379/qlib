@@ -83,10 +83,10 @@ Phase B (ML foundation)        T6 → T7 → T8
 Phase C (LightGBM milestone)   T9 → T10 → T11 → T12   ← ships working baseline replacement
 Phase D (ALSTM milestone)      T13 → T14              ← ships 2-model ensemble
 Phase E (TRA + stacking)       T15 → T16 → T17 → T18 → T19
-Phase F (Frontend + final)     T20 → T21              ← ships full UI integration + acceptance gate
+Phase F (Frontend + final)     T20 → T21 → T22 → T23  ← ships full UI integration + acceptance gate
 ```
 
-Each milestone end (T12, T14, T19, T21) produces a working, shippable system.
+Each milestone end (T12, T14, T19, T23) produces a working, shippable system.
 
 ---
 
@@ -336,11 +336,11 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, time
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -349,9 +349,9 @@ from app.scheduling.schemas import RetrainScheduleRead, RetrainScheduleUpdate
 
 _log = get_logger("scheduling")
 
-# CST trading hours (Shenzhen/Shanghai): 09:30–11:30 lunch 13:00–15:00, but the
-# guard treats the full 09:30–15:00 window as "trading hours" to avoid mid-day
-# model swap. Weekends are never trading hours.
+# CST trading hours (Shenzhen/Shanghai): the guard treats the full 09:30–15:00
+# weekday window as "trading hours" to avoid mid-day model swap. Weekends are
+# never trading hours.
 _TRADING_OPEN = time(9, 30)
 _TRADING_CLOSE = time(15, 0)
 
@@ -367,17 +367,56 @@ class TradingHoursViolation(Exception):
     pass
 
 
+class AlreadyRunning(Exception):
+    pass
+
+
 JobCallable = Callable[[], Awaitable[None]]
 
 
+def make_subprocess_retrain_job(python_path: str, repo_root: Path) -> JobCallable:
+    """Return an async job that spawns `python -m production.rolling_train run-once`
+    as a child process. Required because rolling_train blocks for 1.5–4 hours of
+    CPU/GPU work; running it inside the FastAPI event loop would freeze HTTP.
+    """
+
+    async def _job() -> None:
+        _log.info("retrain_subprocess_starting", python=python_path, cwd=str(repo_root))
+        proc = await asyncio.create_subprocess_exec(
+            python_path,
+            "-m",
+            "production.rolling_train",
+            "run-once",
+            cwd=str(repo_root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        # Drain stdout so the buffer doesn't block the child
+        assert proc.stdout is not None
+        async for line in proc.stdout:
+            _log.info("retrain_subprocess_stdout", line=line.decode(errors="replace").rstrip())
+        rc = await proc.wait()
+        if rc != 0:
+            _log.error("retrain_subprocess_failed", returncode=rc)
+        else:
+            _log.info("retrain_subprocess_ok")
+
+    return _job
+
+
 class SchedulerManager:
-    """Wraps an AsyncIOScheduler and the single-row schedule config."""
+    """Wraps an AsyncIOScheduler and the single-row schedule config.
+
+    Holds a single asyncio.Lock to guarantee that only one retrain runs at a
+    time — whether triggered by cron, by Run-now, or by overlapping schedules.
+    """
 
     JOB_ID = "retrain_weekly"
 
     def __init__(self, job_fn: JobCallable):
         self._scheduler = AsyncIOScheduler()
-        self._job_fn = job_fn
+        self._raw_job_fn = job_fn
+        self._running_lock = asyncio.Lock()
         self._started = False
 
     async def start(self, session: AsyncSession) -> None:
@@ -394,19 +433,31 @@ class SchedulerManager:
             self._started = False
             _log.info("scheduler_stopped")
 
+    @property
+    def is_running(self) -> bool:
+        return self._running_lock.locked()
+
+    def get_next_run_time(self) -> datetime | None:
+        if not self._started:
+            return None
+        job = self._scheduler.get_job(self.JOB_ID)
+        return job.next_run_time if job is not None else None
+
     async def get_schedule(self, session: AsyncSession) -> RetrainScheduleRead:
-        return await self._read_row(session)
+        sched = await self._read_row(session)
+        # Always overlay the live APScheduler next-run-time on top of the
+        # persisted row, in case the DB column wasn't updated this boot.
+        nrt = self.get_next_run_time()
+        if nrt is not None:
+            sched = sched.model_copy(update={"next_run_at": nrt})
+        return sched
 
     async def update_schedule(
         self, session: AsyncSession, payload: RetrainScheduleUpdate
     ) -> RetrainScheduleRead:
-        # Reject trading-hours slots for safety
-        now = datetime.now()
-        sample = datetime(
-            now.year, now.month, now.day, payload.hour, payload.minute
-        )
-        # We check using the day-of-week the user picked rather than today
-        weekday_sample = datetime(2026, 1, 5)  # Mon = weekday 0
+        # Reject trading-hours slots — sample any concrete weekday + the chosen
+        # time to ask is_trading_hours_cst.
+        weekday_sample = datetime(2026, 1, 5)  # Mon Jan 5 2026 is weekday 0
         weekday_sample = weekday_sample.replace(day=5 + payload.day_of_week)
         weekday_sample = weekday_sample.replace(hour=payload.hour, minute=payload.minute)
         if is_trading_hours_cst(weekday_sample):
@@ -427,6 +478,14 @@ class SchedulerManager:
 
         schedule = self._row_to_read(row)
         self._reinstall_job(schedule)
+
+        # Persist the freshly computed next_run_time back to the row so reads
+        # from a fresh DB session see it without going through APScheduler.
+        nrt = self.get_next_run_time()
+        if nrt is not None:
+            row.next_run_at = nrt
+            await session.commit()
+            schedule = self._row_to_read(row)
         _log.info("schedule_updated", schedule=schedule.model_dump())
         return schedule
 
@@ -436,11 +495,23 @@ class SchedulerManager:
             raise TradingHoursViolation(
                 "run_now refused during trading hours; pass force=true to override"
             )
+        if self.is_running:
+            raise AlreadyRunning("a retrain is already running; wait for it to finish")
         job = self._scheduler.add_job(
-            self._job_fn, trigger=None, id=f"{self.JOB_ID}_manual_{now.timestamp():.0f}"
+            self._gated_job_fn,
+            trigger=None,
+            id=f"{self.JOB_ID}_manual_{now.timestamp():.0f}",
         )
         _log.info("run_now_scheduled", job_id=job.id)
         return job.id
+
+    async def _gated_job_fn(self) -> None:
+        """Job wrapper that drops the call if another one is in-flight."""
+        if self._running_lock.locked():
+            _log.warning("retrain_job_skipped_already_running")
+            return
+        async with self._running_lock:
+            await self._raw_job_fn()
 
     def _install_job(self, schedule: RetrainScheduleRead) -> None:
         trigger = CronTrigger(
@@ -448,7 +519,9 @@ class SchedulerManager:
             hour=schedule.hour,
             minute=schedule.minute,
         )
-        self._scheduler.add_job(self._job_fn, trigger=trigger, id=self.JOB_ID, replace_existing=True)
+        self._scheduler.add_job(
+            self._gated_job_fn, trigger=trigger, id=self.JOB_ID, replace_existing=True
+        )
 
     def _reinstall_job(self, schedule: RetrainScheduleRead) -> None:
         try:
@@ -574,7 +647,7 @@ from app.scheduling.schemas import (
     RetrainScheduleUpdate,
     RunNowResponse,
 )
-from app.scheduling.service import SchedulerManager, TradingHoursViolation
+from app.scheduling.service import AlreadyRunning, SchedulerManager, TradingHoursViolation
 
 router = APIRouter()
 
@@ -622,6 +695,8 @@ async def run_now(
         job_id = await get_manager().run_now(session, force=force)
         return RunNowResponse(status="started", job_id=job_id)
     except TradingHoursViolation as exc:
+        return RunNowResponse(status="rejected", reason=str(exc))
+    except AlreadyRunning as exc:
         return RunNowResponse(status="rejected", reason=str(exc))
 ```
 
@@ -675,17 +750,27 @@ async def test_manager_is_initialized_after_lifespan(client):
     assert manager._started is True
 ```
 
-- [ ] **Step 2: Modify `main.py` to wire scheduling**
+- [ ] **Step 2: Add `retrain_python_path` setting**
+
+In `backend/app/core/config.py`, append after `retrain_recorder_experiment`:
+
+```python
+    retrain_python_path: str = "F:/Tools/Anaconda/envs/qlib/python.exe"
+```
+
+- [ ] **Step 3: Modify `main.py` to wire scheduling**
 
 Edit `backend/app/main.py`:
 1. Add imports at the top of imports:
 
 ```python
+from pathlib import Path
+
 from app.scheduling.router import router as scheduling_router, set_manager
-from app.scheduling.service import SchedulerManager
+from app.scheduling.service import SchedulerManager, make_subprocess_retrain_job
 ```
 
-2. Modify `lifespan` to instantiate and start the manager. Replace the existing `lifespan` function with:
+2. Modify `lifespan` to instantiate and start the manager with a real subprocess-spawning job. Replace the existing `lifespan` function with:
 
 ```python
 @asynccontextmanager
@@ -700,12 +785,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning("qlib_not_ready_at_boot", error=str(e))
 
-    # Scheduler manager — job_fn is a stub for now; T10 replaces with the real
-    # rolling_train.run() invocation.
-    async def _stub_job() -> None:
-        log.info("retrain_job_fired_stub")
+    # Scheduler manager — the real retrain runs `production.rolling_train run-once`
+    # in a *subprocess* so the FastAPI event loop is never blocked by the 1.5–4
+    # hours of CPU/GPU work. (The subprocess script is delivered in T10 onwards;
+    # before T10 lands the job will exit non-zero but never crash the API.)
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    retrain_job = make_subprocess_retrain_job(
+        python_path=settings.retrain_python_path,
+        repo_root=repo_root,
+    )
 
-    manager = SchedulerManager(_stub_job)
+    manager = SchedulerManager(retrain_job)
     set_manager(manager)
     from app.core.db import _session_maker
     assert _session_maker is not None
@@ -725,7 +815,7 @@ async def lifespan(app: FastAPI):
     app.include_router(scheduling_router, prefix="/api/scheduling", tags=["scheduling"])
 ```
 
-- [ ] **Step 3: Run all scheduling tests, expect PASS**
+- [ ] **Step 4: Run all scheduling tests, expect PASS**
 
 ```
 cd backend
@@ -734,7 +824,7 @@ F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/scheduling/tests/ -v
 
 Expected: 3 router tests + 7 trading-hours params + 1 service test all PASS.
 
-- [ ] **Step 4: Run the full test suite to check no regressions**
+- [ ] **Step 5: Run the full test suite to check no regressions**
 
 ```
 cd backend
@@ -743,11 +833,11 @@ F:/Tools/Anaconda/envs/qlib/python.exe -m pytest -x
 
 Expected: all green (existing tests + new ones).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```
-git add backend/app/main.py backend/app/scheduling/tests/test_service.py
-git commit -m "feat(scheduling): wire APScheduler lifecycle into FastAPI lifespan"
+git add backend/app/core/config.py backend/app/main.py backend/app/scheduling/tests/test_service.py
+git commit -m "feat(scheduling): wire APScheduler lifecycle with subprocess retrain job"
 ```
 
 ---
@@ -1007,6 +1097,7 @@ def tmp_cache_path(tmp_path: Path) -> Path:
 
 ```python
 from datetime import date
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -1079,7 +1170,7 @@ def test_fetch_remote_when_stale(tmp_cache_path):
 def test_pit_lookup_returns_membership_for_date():
     df = pd.DataFrame(
         {
-            "snapshot_date": [date(2024, 1, 1)] * 3 + [date(2024, 2, 1)] * 3,
+            "snapshot_date": pd.to_datetime([date(2024, 1, 1)] * 3 + [date(2024, 2, 1)] * 3),
             "instrument": ["SH600000", "SH600001", "SH600002", "SH600000", "SH600001", "SH600002"],
             "membership": ["csi300", "csi500", "csi300", "csi300", "csi300", "csi500"],
         }
@@ -1091,6 +1182,38 @@ def test_pit_lookup_returns_membership_for_date():
     # Query for 2024-02-10 -> should use 2024-02-01 snapshot
     members = pit.members_on(df, date(2024, 2, 10))
     assert set(members) == {"SH600000", "SH600001", "SH600002"}
+
+
+def test_write_pit_instruments_file_format(tmp_path: Path):
+    df = pd.DataFrame(
+        {
+            "snapshot_date": pd.to_datetime([date(2024, 1, 1)] * 2 + [date(2024, 2, 1)] * 2),
+            "instrument": ["SH600000", "SH600001", "SH600000", "SH600002"],
+            "membership": ["csi300", "csi300", "csi300", "csi500"],
+        }
+    )
+    qlib_root = tmp_path / "qlib_data" / "cn_data_bs"
+    out_path = pit.write_pit_instruments_file(
+        df,
+        end_date=date(2024, 2, 1),
+        name="csi800_pit_test",
+        qlib_data_root=qlib_root,
+        lookback_years=1,
+    )
+
+    # File exists at <qlib_root>/instruments/<name>.txt
+    assert out_path == qlib_root / "instruments" / "csi800_pit_test.txt"
+    assert out_path.exists()
+
+    # TSV format: instrument <TAB> start_date <TAB> end_date
+    lines = out_path.read_text().strip().splitlines()
+    # Union of all members across both snapshots = SH600000, SH600001, SH600002
+    parsed = sorted(line.split("\t")[0] for line in lines)
+    assert parsed == ["SH600000", "SH600001", "SH600002"]
+    # Every line has 3 tab-separated columns
+    for line in lines:
+        parts = line.split("\t")
+        assert len(parts) == 3
 ```
 
 - [ ] **Step 3: Run, expect failure**
@@ -1230,15 +1353,60 @@ def load_or_refresh(
 def members_on(df: pd.DataFrame, query_date: date) -> list[str]:
     """Return the instruments that were CSI300 or CSI500 members on `query_date`
     (using the most recent month-start snapshot <= query_date)."""
-    snaps = sorted(df["snapshot_date"].unique())
-    snap_dates = [pd.Timestamp(s).date() for s in snaps]
-    cutoff = max((s for s in snap_dates if s <= query_date), default=None)
-    if cutoff is None:
+    # Normalize the snapshot_date column to Timestamp once, then compare on the
+    # date portion. This works whether the underlying values are Python date,
+    # pandas Timestamp, or datetime64.
+    dates_ts = pd.to_datetime(df["snapshot_date"])
+    q_ts = pd.Timestamp(query_date)
+    eligible = dates_ts[dates_ts <= q_ts]
+    if eligible.empty:
         return []
-    snap = df[df["snapshot_date"] == pd.Timestamp(cutoff)]
-    if snap.empty:
-        snap = df[df["snapshot_date"].astype(str) == str(cutoff)]
-    return snap["instrument"].unique().tolist()
+    cutoff = eligible.max()
+    return df.loc[dates_ts == cutoff, "instrument"].unique().tolist()
+
+
+def write_pit_instruments_file(
+    df: pd.DataFrame,
+    end_date: date,
+    name: str,
+    qlib_data_root: Path,
+    lookback_years: int = 7,
+) -> Path:
+    """Write a qlib-compatible instruments file at
+    `<qlib_data_root>/instruments/<name>.txt`.
+
+    Format (TSV, no header):
+        <instrument>\t<start_date>\t<end_date>
+
+    The set of instruments is the **union** of all stocks that were members of
+    CSI300 or CSI500 at any monthly snapshot within
+    `[end_date - lookback_years, end_date]`. Each row spans that whole window —
+    qlib does not natively support overlapping per-stock PIT ranges, so we
+    accept this approximation. True per-day PIT filtering happens upstream in
+    rolling_train.run_once by reindexing training samples against the long
+    `df` returned by `load_or_refresh()`.
+
+    Returns the absolute path of the written file.
+    """
+    start_date = date(end_date.year - lookback_years, end_date.month, 1)
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    dates_ts = pd.to_datetime(df["snapshot_date"])
+    window_mask = (dates_ts >= start_ts) & (dates_ts <= end_ts)
+    members = sorted(df.loc[window_mask, "instrument"].unique().tolist())
+
+    out_dir = qlib_data_root / "instruments"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{name}.txt"
+    start_iso = start_date.isoformat()
+    end_iso = end_date.isoformat()
+    lines = [f"{inst}\t{start_iso}\t{end_iso}" for inst in members]
+    out_path.write_text("\n".join(lines) + "\n")
+    _log.info(
+        "pit_instruments_written",
+        extra={"path": str(out_path), "count": len(members), "name": name},
+    )
+    return out_path
 ```
 
 - [ ] **Step 5: Run tests, expect PASS**
@@ -2004,19 +2172,50 @@ def init_qlib(cfg: RollingConfig) -> None:
     )
 
 
-def build_universe(cfg: RollingConfig, end_date: date) -> list[str]:
-    """Return PIT-correct CSI800 membership as of end_date."""
+def build_universe(cfg: RollingConfig, end_date: date) -> tuple[list[str], str]:
+    """Build the PIT-correct training universe for `end_date`.
+
+    Returns:
+        members: list of qlib instrument codes (the universe of stocks the
+                 handler should pull features for — used by callers for
+                 reporting and for PIT-filtering training samples).
+        universe_name: name of the qlib instruments file written to
+                       `<provider_uri>/instruments/<universe_name>.txt`. Pass
+                       this string (NOT the list) to handler `instruments=`.
+    """
+    from production.pit_constituents import write_pit_instruments_file
+
     pit = load_or_refresh(end=end_date)
-    return members_on(pit, end_date)
+    # Cross-section on end_date — useful for reporting and for the consensus
+    # calc which only emits scores for stocks that were CSI800 members on the
+    # test date.
+    members = members_on(pit, end_date)
+
+    universe_name = f"csi800_pit_{end_date.isoformat()}"
+    qlib_data_root = Path(cfg.provider_uri).expanduser()
+    # lookback_years should cover the longest train_years across horizons (20d = 7y)
+    longest_lookback = max(h.train_years for h in cfg.horizons)
+    write_pit_instruments_file(
+        pit,
+        end_date=end_date,
+        name=universe_name,
+        qlib_data_root=qlib_data_root,
+        lookback_years=longest_lookback + 1,  # +1 for safety
+    )
+    return members, universe_name
 
 
 def train_lgbm_horizon(
     cfg: RollingConfig,
     horizon: HorizonConfig,
-    universe: list[str],
+    universe_name: str,
     end_date: date,
 ) -> pd.Series:
     """Train one LightGBM head and return its predictions on the test window.
+
+    `universe_name` is the qlib instruments-file name produced by
+    `build_universe()` — passed to the handler as a string so qlib resolves it
+    via `D.instruments(market=universe_name)`.
 
     Returns a Series indexed by (datetime, instrument) named like 'lgbm_<horizon>'.
     """
@@ -2054,7 +2253,7 @@ def train_lgbm_horizon(
         end_time=str(s.test_end),
         fit_start_time=str(s.train_start),
         fit_end_time=str(s.train_end),
-        instruments=universe,
+        instruments=universe_name,
     )
     dataset = DatasetH(
         handler=handler,
@@ -2077,8 +2276,11 @@ def train_lgbm_horizon(
 def run_once(cfg: RollingConfig, end_date: date) -> Path:
     """Run one weekly iteration. Returns the path to the written pred.pkl."""
     init_qlib(cfg)
-    universe = build_universe(cfg, end_date)
-    _log.info("universe_built", extra={"size": len(universe), "as_of": str(end_date)})
+    members, universe_name = build_universe(cfg, end_date)
+    _log.info(
+        "universe_built",
+        extra={"size": len(members), "as_of": str(end_date), "name": universe_name},
+    )
 
     # Train all enabled base models for all horizons
     series_list: list[pd.Series] = []
@@ -2087,14 +2289,14 @@ def run_once(cfg: RollingConfig, end_date: date) -> Path:
             continue
         if spec["id"] == "lgbm":
             for h in cfg.horizons:
-                s = train_lgbm_horizon(cfg, h, universe, end_date)
+                s = train_lgbm_horizon(cfg, h, universe_name, end_date)
                 series_list.append(s)
         elif spec["id"] == "alstm":
             from production.train_alstm import train_alstm_multihead  # added in T13
-            series_list.extend(train_alstm_multihead(cfg, universe, end_date))
+            series_list.extend(train_alstm_multihead(cfg, universe_name, end_date))
         elif spec["id"] == "tra":
             from production.train_tra import train_tra_multihead  # added in T15
-            series_list.extend(train_tra_multihead(cfg, universe, end_date))
+            series_list.extend(train_tra_multihead(cfg, universe_name, end_date))
 
     base_preds = pd.concat(series_list, axis=1).dropna(how="all")
 
@@ -2629,7 +2831,12 @@ def _make_cfg():
 def test_multihead_dataset_has_three_label_columns():
     """The multi-head ALSTM dataset stacks 1d / 5d / 20d labels as 3 columns."""
     cfg = _make_cfg()
-    ds = _build_multihead_dataset(cfg, universe=["SH600000"], end_date=pd.Timestamp("2026-05-10").date(), build_features=False)
+    ds = _build_multihead_dataset(
+        cfg,
+        universe_name="csi300",  # any string; not used when build_features=False
+        end_date=pd.Timestamp("2026-05-10").date(),
+        build_features=False,
+    )
     assert ds.label_cols == ["LABEL_1d", "LABEL_5d", "LABEL_20d"]
 ```
 
@@ -2677,10 +2884,13 @@ class MultiHeadDataset:
 
 
 def _build_multihead_dataset(
-    cfg, universe: list[str], end_date: date, build_features: bool = True
+    cfg, universe_name: str, end_date: date, build_features: bool = True
 ) -> MultiHeadDataset:
     """Build 3 handlers (one per horizon), share the universe and time slice.
     Returns label_cols list aligning with the multi-head loss.
+
+    `universe_name` is the qlib instruments-file name produced by
+    `build_universe()` in rolling_train.py.
     """
     prod_path = str((REPO_ROOT / "production").resolve())
     if prod_path not in sys.path:
@@ -2700,7 +2910,7 @@ def _build_multihead_dataset(
                 end_time=str(s.test_end),
                 fit_start_time=str(s.train_start),
                 fit_end_time=str(s.train_end),
-                instruments=universe,
+                instruments=universe_name,
             )
 
     return MultiHeadDataset(
@@ -2712,8 +2922,9 @@ def _build_multihead_dataset(
     )
 
 
-def train_alstm_multihead(cfg, universe: list[str], end_date: date) -> list[pd.Series]:
-    """Train ALSTM with 3 heads; return 3 prediction Series named alstm_1d / _5d / _20d."""
+def train_alstm_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Series]:
+    """Train ALSTM per horizon (β simplification — see spec §5);
+    return 3 prediction Series named alstm_1d / _5d / _20d."""
     from qlib.contrib.model.pytorch_alstm_ts import ALSTM
     from qlib.data.dataset import DatasetH
     from qlib.workflow import R
@@ -2722,7 +2933,7 @@ def train_alstm_multihead(cfg, universe: list[str], end_date: date) -> list[pd.S
     with model_cfg_path.open() as f:
         alstm_yaml = yaml.safe_load(f)
 
-    mhd = _build_multihead_dataset(cfg, universe, end_date)
+    mhd = _build_multihead_dataset(cfg, universe_name, end_date)
     outputs: list[pd.Series] = []
     for h in cfg.horizons:
         handler = mhd.handler_objs[h.name]
@@ -3025,14 +3236,14 @@ def _load_tra_config() -> dict:
         return yaml.safe_load(f)
 
 
-def train_tra_multihead(cfg, universe: list[str], end_date: date) -> list[pd.Series]:
+def train_tra_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Series]:
     """Train TRA per horizon; return tra_1d, tra_5d, tra_20d Series."""
     from qlib.contrib.model.pytorch_tra import TRA
     from qlib.data.dataset import DatasetH
     from qlib.workflow import R
 
     tra_yaml = _load_tra_config()
-    mhd = _build_multihead_dataset(cfg, universe, end_date)
+    mhd = _build_multihead_dataset(cfg, universe_name, end_date)
     outputs: list[pd.Series] = []
     for h in cfg.horizons:
         handler = mhd.handler_objs[h.name]
@@ -3334,9 +3545,13 @@ def _stub_base(end_date: date, model_id: str) -> list[pd.Series]:
 def test_run_once_writes_pred_pkl_with_stacked_score(tmp_path, monkeypatch):
     cfg = rolling_train.load_config(rolling_train.REPO_ROOT / "production/configs/rolling_ensemble.yaml")
     monkeypatch.setattr(rolling_train, "init_qlib", lambda c: None)
-    monkeypatch.setattr(rolling_train, "build_universe", lambda c, d: [f"SH60{i:04d}" for i in range(5)])
+    monkeypatch.setattr(
+        rolling_train,
+        "build_universe",
+        lambda c, d: ([f"SH60{i:04d}" for i in range(5)], "csi800_pit_test"),
+    )
 
-    def _fake_lgbm(cfg, h, universe, end):
+    def _fake_lgbm(cfg, h, universe_name, end):
         return _stub_base(end, "lgbm")[
             [h2.name for h2 in cfg.horizons].index(h.name)
         ]
@@ -4077,7 +4292,7 @@ def screen(
     days: int = Query(default=5, ge=1, le=60),
     min_top: int = Query(default=0, ge=0),
     experiment: str | None = Query(default=None),
-    view: str = Query(default="ensemble", regex="^(ensemble|lightgbm|alstm|tra)$"),
+    view: str = Query(default="ensemble", pattern="^(ensemble|lightgbm|alstm|tra)$"),
 ):
     return service.screen(top=top, days=days, min_top=min_top, experiment=experiment, view=view)
 ```
@@ -4125,7 +4340,492 @@ git commit -m "feat(picks): view selector + consensus column + filter"
 
 ---
 
-### Task 21: Acceptance criteria validation script
+### Task 21: Manual rollback endpoint + Settings UI button
+
+**Files:**
+- Modify: `backend/app/models/schemas.py` (add `RollbackRequest`, `RollbackResponse`)
+- Modify: `backend/app/models/router.py` (add `POST /api/models/rollback`)
+- Modify: `backend/app/models/service.py` (add `rollback_to(target)`)
+- Create: `backend/app/models/tests/test_rollback_endpoint.py`
+- Modify: `frontend/src/components/RetrainScheduleEditor.tsx` (add "Rollback to previous" button)
+- Modify: `frontend/src/api/types.ts` (regenerated)
+
+- [ ] **Step 1: Extend schemas**
+
+In `backend/app/models/schemas.py`, append:
+
+```python
+class RollbackRequest(BaseModel):
+    target: str = Field(
+        default="previous_1",
+        pattern="^(previous_1|previous_2)$",
+        description="Which recorder to roll back to (previous_1 = the run before the current one).",
+    )
+
+
+class RollbackResponse(BaseModel):
+    status: str           # "rolled_back" | "no_op"
+    archived_recorder_id: str | None = None
+    new_current_recorder_id: str | None = None
+    reason: str | None = None
+```
+
+- [ ] **Step 2: Write the failing endpoint test**
+
+`backend/app/models/tests/test_rollback_endpoint.py`:
+
+```python
+from unittest.mock import patch
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import create_app
+
+
+@pytest.fixture
+async def client():
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        async with app.router.lifespan_context(app):
+            yield c
+
+
+async def test_rollback_to_previous_archives_current(client):
+    fake_result = {
+        "status": "rolled_back",
+        "archived_recorder_id": "current_xyz",
+        "new_current_recorder_id": "prev_abc",
+        "reason": None,
+    }
+    with patch("app.models.service.rollback_to", return_value=fake_result):
+        r = await client.post("/api/models/rollback", json={"target": "previous_1"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "rolled_back"
+    assert body["archived_recorder_id"] == "current_xyz"
+
+
+async def test_rollback_with_no_history_is_noop(client):
+    fake_result = {
+        "status": "no_op",
+        "archived_recorder_id": None,
+        "new_current_recorder_id": None,
+        "reason": "no_previous_recorder",
+    }
+    with patch("app.models.service.rollback_to", return_value=fake_result):
+        r = await client.post("/api/models/rollback", json={"target": "previous_1"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "no_op"
+    assert body["reason"] == "no_previous_recorder"
+```
+
+- [ ] **Step 3: Run, expect failure**
+
+```
+cd backend
+F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/models/tests/test_rollback_endpoint.py -v
+```
+
+Expected: 404 or AttributeError pointing at missing `rollback_to`.
+
+- [ ] **Step 4: Implement `rollback_to` in `service.py`**
+
+Append to `backend/app/models/service.py`:
+
+```python
+import shutil
+from pathlib import Path
+
+
+def rollback_to(target: str = "previous_1") -> dict:
+    """Move the current recorder's directory into production/archive/rolled_back/
+    so the next /api/models/screen call picks the (formerly) previous recorder
+    as the new current.
+
+    target = "previous_1" archives 1 recorder.
+    target = "previous_2" archives 2 recorders (rolls back two weeks).
+    """
+    from qlib.workflow import R
+
+    settings = Settings()
+    recs = sorted(
+        R.list_recorders(experiment_name=settings.retrain_recorder_experiment).values(),
+        key=lambda rr: rr.info.get("start_time", ""),
+        reverse=True,
+    )
+    if len(recs) < 2:
+        return {
+            "status": "no_op",
+            "archived_recorder_id": None,
+            "new_current_recorder_id": None,
+            "reason": "no_previous_recorder",
+        }
+
+    n_to_archive = 1 if target == "previous_1" else 2
+    if len(recs) < n_to_archive + 1:
+        return {
+            "status": "no_op",
+            "archived_recorder_id": None,
+            "new_current_recorder_id": None,
+            "reason": "insufficient_history",
+        }
+
+    # mlruns layout: <mlruns_root>/<exp_id>/<recorder_id>/
+    mlruns_root = settings.mlruns_path
+    archive_root = Path(__file__).resolve().parents[3] / "production" / "archive" / "rolled_back"
+
+    archived_ids: list[str] = []
+    for rec in recs[:n_to_archive]:
+        rec_id = rec.id
+        # Locate the recorder dir by walking exp_id subdirs
+        for exp_dir in mlruns_root.iterdir():
+            if not exp_dir.is_dir():
+                continue
+            src = exp_dir / rec_id
+            if src.is_dir():
+                dest = archive_root / exp_dir.name / rec_id
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dest))
+                archived_ids.append(rec_id)
+                break
+
+    new_current = recs[n_to_archive].id if len(recs) > n_to_archive else None
+    return {
+        "status": "rolled_back" if archived_ids else "no_op",
+        "archived_recorder_id": ",".join(archived_ids) if archived_ids else None,
+        "new_current_recorder_id": new_current,
+        "reason": None if archived_ids else "recorder_dir_not_found",
+    }
+```
+
+- [ ] **Step 5: Add the POST route in `router.py`**
+
+```python
+from app.models.schemas import RollbackRequest, RollbackResponse
+
+
+@router.post("/rollback", response_model=RollbackResponse)
+def rollback(payload: RollbackRequest):
+    return service.rollback_to(target=payload.target)
+```
+
+- [ ] **Step 6: Run the test, expect PASS**
+
+```
+cd backend
+F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/models/tests/test_rollback_endpoint.py -v
+```
+
+Expected: 2 tests PASS.
+
+- [ ] **Step 7: Regenerate frontend types + add UI button**
+
+```
+cd frontend
+npm run gen:api
+```
+
+In `frontend/src/components/RetrainScheduleEditor.tsx`, add below the "Run now" button block:
+
+```tsx
+const rollbackMut = useMutation({
+  mutationFn: async () => {
+    const { data, error } = await client.POST("/api/models/rollback", {
+      body: { target: "previous_1" },
+    });
+    if (error) throw new Error(JSON.stringify(error));
+    return data;
+  },
+  onSuccess: () => {
+    qc.invalidateQueries({ queryKey: ["model-version"] });
+  },
+});
+```
+
+Add to the JSX (next to the Run-now button):
+
+```tsx
+<button
+  className="px-3 py-1 bg-red-700 rounded"
+  onClick={() => {
+    if (confirm("Roll back to previous week's model? The current recorder will be archived.")) {
+      rollbackMut.mutate();
+    }
+  }}
+>
+  Rollback to previous
+</button>
+{rollbackMut.data?.status === "no_op" && (
+  <div className="text-yellow-400 text-sm">Rollback no-op: {rollbackMut.data.reason}</div>
+)}
+{rollbackMut.data?.status === "rolled_back" && (
+  <div className="text-green-400 text-sm">
+    Rolled back. Archived: {rollbackMut.data.archived_recorder_id?.slice(0, 8)}. New current: {rollbackMut.data.new_current_recorder_id?.slice(0, 8)}.
+  </div>
+)}
+```
+
+- [ ] **Step 8: Smoke-test in browser**
+
+Restart backend + frontend. On the Settings page, click "Rollback to previous". With < 2 recorders in mlruns, the UI shows "Rollback no-op: no_previous_recorder". With 2+ recorders, the latest is moved to `production/archive/rolled_back/` and the Dashboard card refreshes to show the previous recorder as current.
+
+- [ ] **Step 9: Commit**
+
+```
+git add backend/app/models/ frontend/src/components/RetrainScheduleEditor.tsx frontend/src/api/types.ts
+git commit -m "feat(models): manual rollback endpoint + Settings UI button"
+```
+
+---
+
+### Task 22: Charts page per-model prediction overlay
+
+**Files:**
+- Modify: `backend/app/models/schemas.py` (extend `PredictionPoint` with `base_scores`)
+- Modify: `backend/app/models/service.py` (read base_scores from pred.pkl in `prediction_history`)
+- Modify: `backend/app/models/router.py` (add `?view=` to `GET /predictions/{symbol}`)
+- Create: `backend/app/models/tests/test_predictions_view.py`
+- Modify: `frontend/src/charts/PredictionChart.tsx` (per-model overlay toggle)
+- Modify: `frontend/src/api/types.ts` (regenerated)
+
+- [ ] **Step 1: Extend `PredictionPoint`**
+
+In `backend/app/models/schemas.py`:
+
+```python
+class PredictionPoint(BaseModel):
+    date: str
+    score: float
+    rank: int
+    universe_size: int
+    base_scores: dict[str, float] = Field(default_factory=dict)
+```
+
+- [ ] **Step 2: Write the failing test**
+
+`backend/app/models/tests/test_predictions_view.py`:
+
+```python
+from unittest.mock import patch
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import create_app
+
+
+@pytest.fixture
+async def client():
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        async with app.router.lifespan_context(app):
+            yield c
+
+
+async def test_predictions_returns_base_scores_per_day(client):
+    fake_history = {
+        "symbol": "SH600000",
+        "name": "浦发银行",
+        "experiment": "rolling_v2_ensemble",
+        "points": [
+            {
+                "date": "2026-05-15",
+                "score": 0.12,
+                "rank": 5,
+                "universe_size": 800,
+                "base_scores": {
+                    "lgbm_1d": 0.10, "lgbm_5d": 0.13, "lgbm_20d": 0.14,
+                    "alstm_1d": 0.08, "alstm_5d": 0.11, "alstm_20d": 0.15,
+                    "tra_1d": 0.09, "tra_5d": 0.12, "tra_20d": 0.13,
+                },
+            },
+        ],
+    }
+    with patch("app.models.service.prediction_history", return_value=fake_history):
+        r = await client.get("/api/models/predictions/SH600000?view=alstm")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["points"][0]["base_scores"]["alstm_5d"] == 0.11
+
+
+async def test_predictions_default_view_is_ensemble(client):
+    fake_history = {
+        "symbol": "SH600000", "name": "", "experiment": "rolling_v2_ensemble", "points": [],
+    }
+    with patch("app.models.service.prediction_history", return_value=fake_history) as mock_svc:
+        r = await client.get("/api/models/predictions/SH600000")
+    assert r.status_code == 200
+    # Verify default view=ensemble was passed through
+    assert mock_svc.call_args.kwargs.get("view", "ensemble") == "ensemble"
+```
+
+- [ ] **Step 3: Run, expect failure**
+
+```
+cd backend
+F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/models/tests/test_predictions_view.py -v
+```
+
+Expected: failure because `view` is not a route parameter yet.
+
+- [ ] **Step 4: Extend the route + service**
+
+In `backend/app/models/router.py`, replace the existing `predictions` route:
+
+```python
+@router.get("/predictions/{symbol}", response_model=PredictionHistory)
+def predictions(
+    symbol: str,
+    days: int = Query(default=60, ge=1, le=365),
+    experiment: str | None = Query(default=None),
+    view: str = Query(default="ensemble", pattern="^(ensemble|lightgbm|alstm|tra)$"),
+):
+    return service.prediction_history(symbol=symbol, days=days, experiment=experiment, view=view)
+```
+
+In `backend/app/models/service.py`, modify `prediction_history` signature and body. The current function loads `pred.pkl` and emits a series of (date, score, rank, universe_size). The new version:
+
+1. Add `view` parameter with default "ensemble".
+2. After loading the df, when `view != "ensemble"`, derive `score` from the average of that model's per-horizon columns.
+3. For every point, also emit the `base_scores` dict containing the per-base columns (lgbm_1d, lgbm_5d, lgbm_20d, alstm_*, tra_*) that exist in the row.
+
+The relevant edit (inside the existing function, after loading the df and before the per-day loop):
+
+```python
+def prediction_history(symbol: str, days: int, experiment: str | None, view: str = "ensemble"):
+    df = _load_pred_pkl(experiment)
+    reserved = {"score", "consensus"}
+    base_cols = [c for c in df.columns if c not in reserved]
+
+    if view != "ensemble":
+        prefix = view + "_"
+        view_cols = [c for c in base_cols if c.startswith(prefix)]
+        if view_cols:
+            df = df.copy()
+            df["score"] = df[view_cols].mean(axis=1)
+
+    # … existing logic that filters to symbol and last `days` rows …
+
+    points = []
+    for d, row in symbol_df.iterrows():
+        base_scores = {
+            c: float(row[c])
+            for c in base_cols
+            if c in row.index and pd.notna(row[c])
+        }
+        points.append(
+            PredictionPoint(
+                date=str(d.date()),
+                score=float(row["score"]),
+                rank=int(row.get("rank", 0)),
+                universe_size=int(row.get("universe_size", 0)),
+                base_scores=base_scores,
+            )
+        )
+    return PredictionHistory(symbol=symbol, name=name_map.get(symbol, ""), experiment=experiment_name, points=points)
+```
+
+(Keep the existing logic that resolves `experiment`, builds `symbol_df`, computes `rank` and `universe_size` per day.)
+
+- [ ] **Step 5: Run, expect PASS**
+
+```
+cd backend
+F:/Tools/Anaconda/envs/qlib/python.exe -m pytest app/models/tests/test_predictions_view.py -v
+```
+
+Expected: 2 tests PASS.
+
+- [ ] **Step 6: Regenerate frontend types + add chart overlay**
+
+```
+cd frontend
+npm run gen:api
+```
+
+In `frontend/src/charts/PredictionChart.tsx`, add a sub-view selector and an overlay-mode toggle. The component already renders an ensemble score line; we add three optional base-model lines (LightGBM-avg, ALSTM-avg, TRA-avg) toggleable via checkboxes:
+
+```tsx
+const [overlays, setOverlays] = useState<{ lgbm: boolean; alstm: boolean; tra: boolean }>({
+  lgbm: false,
+  alstm: false,
+  tra: false,
+});
+
+// In the existing useQuery, request the full history (view=ensemble), which
+// always returns base_scores. We compute overlay lines client-side.
+// (The backend `?view=` query param is for the table on the Picks page; here
+//  we show the ensemble + selectable overlays from the same payload.)
+
+// Inside the chart rendering effect:
+useEffect(() => {
+  if (!chart || !data) return;
+  ['lgbm', 'alstm', 'tra'].forEach((mid) => {
+    const enabled = overlays[mid as keyof typeof overlays];
+    const seriesId = `overlay-${mid}`;
+    // Remove if disabled
+    if (!enabled) {
+      const existing = chart.seriesByKey?.[seriesId];
+      if (existing) {
+        chart.removeSeries(existing);
+        delete chart.seriesByKey![seriesId];
+      }
+      return;
+    }
+    // Skip if already added
+    if (chart.seriesByKey?.[seriesId]) return;
+
+    const colour = mid === 'lgbm' ? '#26a69a' : mid === 'alstm' ? '#3b82f6' : '#a78bfa';
+    const lineSeries = chart.addLineSeries({ color: colour, lineWidth: 1 });
+    const points = data.points.map((p) => {
+      const cols = Object.keys(p.base_scores).filter((c) => c.startswith(mid + '_'));
+      if (cols.length === 0) return null;
+      const avg = cols.reduce((sum, c) => sum + p.base_scores[c], 0) / cols.length;
+      return { time: p.date as Time, value: avg };
+    }).filter(Boolean);
+    lineSeries.setData(points as LineData[]);
+    (chart.seriesByKey ||= {})[seriesId] = lineSeries;
+  });
+}, [chart, data, overlays]);
+```
+
+Add the overlay checkboxes to the chart toolbar:
+
+```tsx
+<div className="flex gap-3 text-xs">
+  {(["lgbm", "alstm", "tra"] as const).map((mid) => (
+    <label key={mid} className="flex items-center gap-1">
+      <input
+        type="checkbox"
+        checked={overlays[mid]}
+        onChange={(e) => setOverlays((o) => ({ ...o, [mid]: e.target.checked }))}
+      />
+      <span className={
+        mid === "lgbm" ? "text-emerald-400"
+        : mid === "alstm" ? "text-blue-400"
+        : "text-purple-400"
+      }>{mid.toUpperCase()}</span>
+    </label>
+  ))}
+</div>
+```
+
+- [ ] **Step 7: Smoke-test in browser**
+
+Open `http://localhost:5173/charts/SH600000`. The ensemble score line is shown by default. Toggle "LGBM" → a green line appears for the LightGBM-avg. Toggle "ALSTM" → blue line. Toggle "TRA" → purple line. Untoggling removes the lines without affecting the ensemble line.
+
+- [ ] **Step 8: Commit**
+
+```
+git add backend/app/models/ frontend/src/charts/PredictionChart.tsx frontend/src/api/types.ts
+git commit -m "feat(charts): per-model prediction overlay (LGBM / ALSTM / TRA)"
+```
+
+---
+
+### Task 23: Acceptance criteria validation script
 
 **Files:**
 - Create: `production/validate_acceptance.py`
@@ -4266,7 +4966,7 @@ Expected: 3 tests PASS.
 F:/Tools/Anaconda/envs/qlib/python.exe -m pytest production/tests/ -v
 ```
 
-Expected: every production test PASSes. (Numbers: 5 PIT, 5 walk-forward, 4 multi-horizon labels, 3 post-process, 5 consensus, 2 rank-avg, 1 ALSTM, 1 TRA, 4 stacker, 1 pipeline, 4 metrics, 3 archive, 3 shadow, 3 acceptance ≈ 44 tests.)
+Expected: every production test PASSes. (Numbers: 6 PIT, 5 walk-forward, 4 multi-horizon labels, 3 post-process, 5 consensus, 2 rank-avg, 1 ALSTM, 1 TRA, 4 stacker, 1 pipeline, 4 metrics, 3 archive, 3 shadow, 3 acceptance ≈ 45 tests.)
 
 - [ ] **Step 6: Run the full backend test suite**
 
@@ -4288,7 +4988,7 @@ git commit -m "feat(production): acceptance criteria validator"
 
 ## Acceptance Criteria Summary (per spec §11)
 
-After T21 the following must all hold. Each line maps to the task that delivers it.
+After T23 the following must all hold. Each line maps to the task that delivers it.
 
 **Functional:**
 - `production/rolling_train.py run-once` runs end-to-end without manual intervention (T10–T18).
@@ -4300,13 +5000,15 @@ After T21 the following must all hold. Each line maps to the task that delivers 
 - Ensemble output includes per-stock `consensus` field ∈ [0, 1] (T10, T11).
 - Shadow paper trading framework runs new candidates in parallel for 4 weeks before swap (T19).
 - Auto-rollback to N-2 recorder triggers on 2-week negative IR (T19).
+- Manual rollback via `POST /api/models/rollback` + Settings UI button (T21).
+- Charts page shows per-model overlay toggles (LightGBM / ALSTM / TRA averages) (T22).
 
 **Performance (validated by `production/validate_acceptance.py`):**
-- IC mean ≥ 0.030 (T18, T21)
-- IR (cost-adjusted) ≥ 2.5 (T18, T21)
-- Max drawdown ≤ 15% (T18, T21)
-- Daily turnover ≤ 20% (T18, T21)
-- All 5 regime-split segments have IR > 0 (T18, T21)
+- IC mean ≥ 0.030 (T18, T23)
+- IR (cost-adjusted) ≥ 2.5 (T18, T23)
+- Max drawdown ≤ 15% (T18, T23)
+- Daily turnover ≤ 20% (T18, T23)
+- All 5 regime-split segments have IR > 0 (T18, T23)
 
 **Quality:**
 - Hyperparameters locked in YAML; no in-code tuning during weekly runs (T9, T13, T15).
@@ -4318,11 +5020,12 @@ After T21 the following must all hold. Each line maps to the task that delivers 
 
 ## Known Deviations / Followups
 
-1. **ALSTM multi-head simplification (T13):** the spec calls for a *single network with 3 heads*; this plan trains qlib's stock ALSTM 3 times (one per horizon). Both produce 3 alstm_* columns for stacking. True multi-task head sharing is a follow-up issue.
+1. **ALSTM multi-head simplification (T13):** spec §5 was updated to acknowledge this — β trains 3 independent ALSTM/TRA instances (one per horizon) because qlib's stock `ALSTM`/`TRA` are single-output. Wall-clock is 3× longer than the original spec, mitigated by early stopping. Implementing true label multi-head is a γ-phase optimization.
 2. **Stacker OOF approximation (T17):** the spec calls for fitting Ridge on a dedicated `Stack-fit 1y` window with base preds materialized there. This plan reuses the *valid* window predictions because qlib already early-stops on valid (not fit on it), which is a reasonable approximation. A dedicated Stack-fit window is a follow-up issue when training-time budget allows.
-3. **Monthly review report (spec §8 last paragraph):** `production/reports/<year>_<month>.md` auto-generation is described in the spec but is not gated by acceptance criteria (§11). Add as a follow-up after β stabilizes; pulls per-week IR table, base-model contribution, Ridge coefficient evolution, and top-30 hit rate from mlruns.
-4. **Shadow `?view=shadow` UI surface:** the backend `GET /api/models/shadow` endpoint described in spec §9 is *not* implemented in this plan — only the tracker (T19) writes state. Wire up the shadow comparison endpoint and Dashboard card after β meets acceptance.
-5. **Real broker integration is OUT of scope forever (per spec §2 "Out of scope").**
+3. **PIT instruments file uses union-of-window range (T6):** the qlib instruments file format does not natively support per-day membership ranges, so the file is written with the union of all stocks that were ever a CSI300/CSI500 member in the lookback window, each spanning the full window. Per-day PIT correctness is enforced upstream in `rolling_train.run_once` (training samples are reindexed against the long PIT df). This means feature extraction may compute features for stocks that weren't members on a given day, which we then discard — slight wasted compute, no leakage.
+4. **Monthly review report (spec §8 last paragraph):** `production/reports/<year>_<month>.md` auto-generation is described in the spec but is not gated by acceptance criteria (§11). Add as a follow-up after β stabilizes; pulls per-week IR table, base-model contribution, Ridge coefficient evolution, and top-30 hit rate from mlruns.
+5. **Shadow `GET /api/models/shadow` UI surface:** the backend endpoint described in spec §9 is *not* implemented in this plan — only the tracker (T19) writes state. Wire up the shadow comparison endpoint and Dashboard card after β meets acceptance.
+6. **Real broker integration is OUT of scope forever (per spec §2 "Out of scope").**
 
 ---
 
