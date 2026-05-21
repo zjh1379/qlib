@@ -9,6 +9,20 @@ Phase E (beta complete): runs all 3 base models (LightGBM/ALSTM/TRA) x 3 horizon
 fits a Ridge stacker on the valid-window OOF preds, falls back to rank-average
 if stacking fails, and emits a single pred.pkl with score + consensus + base
 columns. See docs/superpowers/specs/2026-05-21-rolling-ensemble-algorithm-design.md.
+
+Known followups (deferred from beta to gamma):
+    - ShadowTracker (production/shadow_tracker.py) is implemented and tested
+      but not yet wired into run_once. The 4-week shadow-vs-prod IR comparison
+      will never fire until this is integrated. Decision required: how to flag
+      a recorder as 'shadow' -- via recorder_name prefix, a config flag, or
+      a separate experiment name. See spec section 8 for the intended semantics.
+    - Stacker OOF uses the valid window rather than a dedicated stack-fit
+      window. Acceptable approximation since base models early-stop on valid.
+    - PIT instruments file writes one range per stock (union of window),
+      not true per-day membership. True per-day filtering happens upstream
+      via the pit df reindex.
+    - ALSTM/TRA train per-horizon, not multi-head -- see train_alstm.py and
+      train_tra.py for the beta simplification rationale.
 """
 from __future__ import annotations
 

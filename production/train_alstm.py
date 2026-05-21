@@ -117,9 +117,12 @@ def train_alstm_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Se
         )
         model = ALSTM(**alstm_yaml["model"]["kwargs"])
         with R.start(experiment_name=cfg.experiment_name, recorder_name=f"alstm_{h.name}_{end_date}"):
-            model.fit(dataset)
-            pred = model.predict(dataset)
-            R.save_objects(**{f"pred_{h.name}.pkl": pred})
-        outputs.append(pred.rename(f"alstm_{h.name}"))
+            try:
+                model.fit(dataset)
+                pred = model.predict(dataset)
+                R.save_objects(**{f"pred_{h.name}.pkl": pred})
+                outputs.append(pred.rename(f"alstm_{h.name}"))
+            except Exception as exc:
+                _log.warning("alstm_failed_skipping horizon=%s error=%s", h.name, str(exc))
 
     return outputs

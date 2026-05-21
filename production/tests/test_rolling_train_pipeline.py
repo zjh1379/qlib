@@ -19,7 +19,14 @@ def _stub_base(end_date: date, model_id: str) -> list[pd.Series]:
     ]
 
 
-def test_run_once_writes_pred_pkl_with_stacked_score(tmp_path, monkeypatch):
+def test_run_once_writes_pred_pkl_via_fallback_when_qlib_unavailable(tmp_path, monkeypatch):
+    """When qlib is mocked out, D.features fails and the stacker falls back to
+    rank_average. The final pred.pkl still has score + consensus + 9 base columns.
+
+    NOTE: This test only exercises the FALLBACK path; the stacker fit/predict
+    path is unit-tested in test_ensemble_stacker.py but not yet integration-tested
+    end-to-end. See production/rolling_train.py docstring for the followups list.
+    """
     cfg = rolling_train.load_config(rolling_train.REPO_ROOT / "production/configs/rolling_ensemble.yaml")
     monkeypatch.setattr(rolling_train, "init_qlib", lambda c: None)
     monkeypatch.setattr(

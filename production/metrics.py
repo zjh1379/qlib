@@ -53,7 +53,7 @@ def compute_scorecard(
     icir = ic.mean() / ic.std() if ic.std() > 0 else float("nan")
 
     df = pd.concat([pred.rename("p"), label.rename("y")], axis=1).dropna()
-    monthly_groups = df.groupby(pd.Grouper(level="datetime", freq="M"))
+    monthly_groups = df.groupby(pd.Grouper(level="datetime", freq="ME"))
     spreads = []
     for _, g in monthly_groups:
         if g.empty:
