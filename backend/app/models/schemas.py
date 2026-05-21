@@ -9,6 +9,8 @@ class ScreenItem(BaseModel):
     score_avg: float                # mean score over `days` window
     rank_avg: float                 # mean cross-sectional rank over `days` window (lower = better)
     days_in_top: int                # how many of the `days` window days this symbol was in top-N
+    consensus: float = 0.0
+    base_scores: dict[str, float] = Field(default_factory=dict)
 
 
 class ScreenResponse(BaseModel):
