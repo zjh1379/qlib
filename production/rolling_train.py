@@ -292,6 +292,39 @@ def run_once(cfg: RollingConfig, end_date: date) -> Path:
     except Exception as exc:
         _log.warning("scorecard_failed error=%s", str(exc))
 
+    # Auto-archive recorders older than cfg.archive_weeks
+    from production.mlruns_archive import archive_old_recorders
+    mlruns_root = REPO_ROOT / "examples" / "mlruns"
+    archive_root = REPO_ROOT / "production" / "archive"
+    archived = archive_old_recorders(mlruns_root, archive_root, keep_weeks=cfg.archive_weeks)
+    _log.info("recorders_archived count=%d", archived)
+
+    # Auto-rollback: if past 2 weeks cumulative IR < 0, revert to N-2 recorder
+    try:
+        from qlib.workflow import R
+        recs = sorted(
+            R.list_recorders(experiment_name=cfg.experiment_name).values(),
+            key=lambda r: r.info.get("start_time", ""),
+            reverse=True,
+        )
+        if len(recs) >= 3:
+            recent_irs = []
+            for rr in recs[:2]:
+                m = rr.list_metrics() if hasattr(rr, "list_metrics") else {}
+                if "ir" in m:
+                    recent_irs.append(m["ir"])
+            if recent_irs and sum(recent_irs) < 0:
+                _log.warning(
+                    "auto_rollback_triggered current=%s rollback_to=%s recent_irs=%s",
+                    recs[0].id, recs[2].id, recent_irs,
+                )
+                bad_rec_dir = mlruns_root / "1" / recs[0].id
+                if bad_rec_dir.exists():
+                    import shutil as _sh
+                    _sh.move(str(bad_rec_dir), str(archive_root / "1" / f"rolled_back_{recs[0].id}"))
+    except Exception as exc:
+        _log.warning("rollback_check_failed error=%s", str(exc))
+
     return pred_path
 
 
