@@ -219,13 +219,13 @@ def run_once(cfg: RollingConfig, end_date: date) -> Path:
 
     base_preds = pd.concat(series_list, axis=1).dropna(how="all")
 
-    # Ensemble step — Phase C stub: use lgbm_5d as the unified score.
-    # Phase D (T14) replaces this with rank-average; Phase E (T17) replaces
-    # with Ridge stacking.
-    if "lgbm_5d" in base_preds.columns:
-        unified = base_preds["lgbm_5d"].rename("score")
-    else:
-        unified = base_preds.mean(axis=1).rename("score")
+    # Ensemble step — Phase D: rank-average across all base columns.
+    # Phase E (T17) replaces with Ridge stacking; this remains as the fallback.
+    from production.ensemble_rank_avg import rank_average
+
+    rank_avg_series = rank_average(base_preds)
+    # Convert "lower rank = better" to a higher-is-better score by negating.
+    unified = (-rank_avg_series).rename("score")
 
     out = base_preds.copy()
     out["score"] = unified
