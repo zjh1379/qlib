@@ -266,6 +266,32 @@ def run_once(cfg: RollingConfig, end_date: date) -> Path:
     pred_path = REPO_ROOT / "examples" / "mlruns" / f"pred_{end_date}.pkl"
     write_pred_pkl(out, pred_path)
     _log.info("pred_pkl_written path=%s rows=%d", str(pred_path), len(out))
+
+    # Step ⑦ — Scorecard on the test window (if labels are available)
+    try:
+        from qlib.data import D
+        h5 = next(h for h in cfg.horizons if h.name == "5d")
+        s_5 = split(end_date=end_date, cfg=h5)
+        labels = D.features(
+            instruments=universe_name,
+            fields=["Ref($open, -6) / Ref($open, -1) - 1"],
+            start_time=str(s_5.test_start),
+            end_time=str(s_5.test_end),
+        )
+        labels.columns = ["y"]
+        labels.index.names = ["instrument", "datetime"]
+        labels = labels.swaplevel().sort_index()["y"]
+
+        from production.metrics import compute_scorecard
+        score_window = out.reset_index().set_index(["datetime", "instrument"])["score"]
+        scorecard = compute_scorecard(score_window, labels, top_k=30, bps=cfg.cost_bps)
+        _log.info("scorecard %s", scorecard)
+        from qlib.workflow import R
+        with R.start(experiment_name=cfg.experiment_name, recorder_name=f"ensemble_{end_date}"):
+            R.log_metrics(**{k: v for k, v in scorecard.items() if pd.notna(v)})
+    except Exception as exc:
+        _log.warning("scorecard_failed error=%s", str(exc))
+
     return pred_path
 
 
