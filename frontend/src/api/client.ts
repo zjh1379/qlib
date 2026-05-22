@@ -123,19 +123,40 @@ export const api = {
         view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
         min_price?: number | null;
         max_price?: number | null;
+        pct_change_n?: 1 | 3 | 5 | 10 | 20;
+        min_pct_change?: number | null;
+        max_pct_change?: number | null;
+        min_amplitude?: number | null;
+        max_amplitude?: number | null;
+        min_vol_ratio?: number | null;
+        max_vol_ratio?: number | null;
+        new_high_n?: 0 | 20 | 60 | 120;
+        boards?: string[]; // serialized as comma list
+        exclude_st?: boolean;
       } = {},
     ) => {
       type R = paths['/api/models/screen']['get']['responses']['200']['content']['application/json'];
       const q = new URLSearchParams();
+      const setNullable = (key: string, v: number | null | undefined) => {
+        if (v !== undefined && v !== null) q.set(key, String(v));
+      };
       if (params.top !== undefined) q.set('top', String(params.top));
       if (params.days !== undefined) q.set('days', String(params.days));
       if (params.min_top !== undefined) q.set('min_top', String(params.min_top));
       if (params.experiment) q.set('experiment', params.experiment);
       if (params.view) q.set('view', params.view);
-      if (params.min_price !== undefined && params.min_price !== null)
-        q.set('min_price', String(params.min_price));
-      if (params.max_price !== undefined && params.max_price !== null)
-        q.set('max_price', String(params.max_price));
+      setNullable('min_price', params.min_price);
+      setNullable('max_price', params.max_price);
+      if (params.pct_change_n !== undefined) q.set('pct_change_n', String(params.pct_change_n));
+      setNullable('min_pct_change', params.min_pct_change);
+      setNullable('max_pct_change', params.max_pct_change);
+      setNullable('min_amplitude', params.min_amplitude);
+      setNullable('max_amplitude', params.max_amplitude);
+      setNullable('min_vol_ratio', params.min_vol_ratio);
+      setNullable('max_vol_ratio', params.max_vol_ratio);
+      if (params.new_high_n !== undefined) q.set('new_high_n', String(params.new_high_n));
+      if (params.boards && params.boards.length > 0) q.set('boards', params.boards.join(','));
+      if (params.exclude_st !== undefined) q.set('exclude_st', params.exclude_st ? 'true' : 'false');
       const qs = q.toString();
       return request<R>(`/api/models/screen${qs ? '?' + qs : ''}`);
     },

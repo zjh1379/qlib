@@ -9,12 +9,23 @@ export function useScreen(
     view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
     min_price?: number | null;
     max_price?: number | null;
+    pct_change_n?: 1 | 3 | 5 | 10 | 20;
+    min_pct_change?: number | null;
+    max_pct_change?: number | null;
+    min_amplitude?: number | null;
+    max_amplitude?: number | null;
+    min_vol_ratio?: number | null;
+    max_vol_ratio?: number | null;
+    new_high_n?: 0 | 20 | 60 | 120;
+    boards?: string[];
+    exclude_st?: boolean;
   } = {},
 ) {
   return useQuery({
     queryKey: ['models', 'screen', params],
     queryFn: () => api.models.screen(params),
     staleTime: 5 * 60_000,
+    placeholderData: (prev) => prev, // keep old results visible during refetch
   });
 }
 

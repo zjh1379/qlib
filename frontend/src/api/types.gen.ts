@@ -722,6 +722,19 @@ export interface components {
             };
             /** Last Price */
             last_price?: number | null;
+            /** Pct Change 5D */
+            pct_change_5d?: number | null;
+            /** Amplitude */
+            amplitude?: number | null;
+            /** Vol Ratio */
+            vol_ratio?: number | null;
+            /** Board */
+            board?: string | null;
+            /**
+             * Is St
+             * @default false
+             */
+            is_st: boolean;
         };
         /** ScreenResponse */
         ScreenResponse: {
@@ -1250,6 +1263,20 @@ export interface operations {
                 min_price?: number | null;
                 /** @description Inclusive upper bound on most-recent close (CNY/share) */
                 max_price?: number | null;
+                /** @description Lookback in trading days for pct_change filter */
+                pct_change_n?: number;
+                /** @description Min pct change over pct_change_n (e.g. 0.05 = +5%) */
+                min_pct_change?: number | null;
+                max_pct_change?: number | null;
+                min_amplitude?: number | null;
+                max_amplitude?: number | null;
+                min_vol_ratio?: number | null;
+                max_vol_ratio?: number | null;
+                /** @description 0=off, 20/60/120 = require close to be N-day high */
+                new_high_n?: number;
+                /** @description Comma list: main,gem,star,bj,etf */
+                boards?: string | null;
+                exclude_st?: boolean;
             };
             header?: never;
             path?: never;
