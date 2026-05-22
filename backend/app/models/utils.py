@@ -52,13 +52,14 @@ def is_st_name(name: str) -> bool:
     """Return True iff the company name has an ST / *ST risk marker at the start."""
     if not name:
         return False
-    # Anchor to start; require ST to be followed by whitespace, asterisk, or
-    # end-of-string so we don't falsely match 'STAR' or other ST-prefixed words.
+    # Anchor to start; require ST to be followed by whitespace or asterisk;
+    # bare 'ST' or 'ST<chinese>' goes through the fallback branch below.
     if _ST_PATTERN.match(name):
         return True
     # Also handle the exact-prefix "ST<chinese>" without a separator — Chinese
-    # characters effectively act as a token boundary.
-    stripped = name.lstrip()
+    # characters effectively act as a token boundary. Normalize to uppercase
+    # to stay consistent with the case-insensitive regex above.
+    stripped = name.lstrip().upper()
     if stripped.startswith(("ST", "*ST")):
         rest = stripped[3:] if stripped.startswith("*ST") else stripped[2:]
         if rest and not rest[0].isascii():

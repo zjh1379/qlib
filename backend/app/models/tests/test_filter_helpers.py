@@ -33,7 +33,8 @@ def test_parse_board_unknown_returns_other():
     [
         ("ST康美", True),
         ("*ST康美", True),
-        ("ST 康美", True),       # trailing/leading whitespace + space variant
+        ("ST 康美", True),       # internal-space variant
+        ("  ST康美", True),      # leading whitespace + no separator
         ("ST*康美", True),       # variant ordering
         ("贵州茅台", False),
         ("茅台", False),
@@ -43,3 +44,8 @@ def test_parse_board_unknown_returns_other():
 )
 def test_is_st_name(name, expected):
     assert is_st_name(name) == expected
+
+
+def test_is_st_name_case_insensitive():
+    assert is_st_name("st康美") == is_st_name("ST康美") == True
+    assert is_st_name("sT*康美") == True
