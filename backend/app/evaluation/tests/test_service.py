@@ -85,3 +85,30 @@ def test_force_refresh_bypasses_cache(qlib_ready):
     # Same recorder, same data, same metrics — but computed_at differs.
     assert r1.scorecard.ic_mean == r2.scorecard.ic_mean
     assert r1.computed_at != r2.computed_at
+
+
+def test_regime_labels_align_when_some_segments_empty(qlib_ready):
+    """Regression: if regime_split drops an empty segment from its return dict,
+    the loop in evaluate_recorder must still correctly label remaining segments
+    (no off-by-one from positional zip)."""
+    summaries = list_recorders_with_summary()
+    target = next((s for s in summaries if s.experiment == "daily_cn_fresh"), None)
+    if target is None:
+        pytest.skip("no daily_cn_fresh recorder")
+
+    result = evaluate_recorder(target.recorder_id, force_refresh=True)
+    # daily_cn_fresh predictions start in 2025 — none of the 5 spec regimes
+    # (2018-2024) overlap; only the synthesized "Recent (full window)" segment
+    # should appear.
+    labels = [r.label for r in result.regimes]
+    assert "Recent (full window)" in labels, f"expected 'Recent' segment, got {labels}"
+    # Every regime label must match an entry from _REGIME_SEGMENTS or be the Recent catch-all
+    from app.evaluation.service import _REGIME_SEGMENTS
+    valid = {l for l, _, _ in _REGIME_SEGMENTS} | {"Recent (full window)"}
+    for r in result.regimes:
+        assert r.label in valid, f"regime label {r.label!r} not in spec set"
+        # Each segment's date range must match a known regime spec (or the synthetic recent)
+        if r.label != "Recent (full window)":
+            spec = next(seg for seg in _REGIME_SEGMENTS if seg[0] == r.label)
+            assert (r.start, r.end) == (spec[1], spec[2]), \
+                f"regime {r.label}: dates {r.start}..{r.end} don't match spec {spec[1]}..{spec[2]}"

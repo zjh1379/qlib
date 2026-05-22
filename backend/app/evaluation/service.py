@@ -226,9 +226,12 @@ def _evaluate_cached(recorder_id: str, top_k: int, cost_bps: float) -> EvalResul
     overlapping = _overlapping_regimes(pred)
     regimes_raw = regime_split(pred, labels, [(s, e) for _, s, e in overlapping])
     regimes: list[RegimeMetrics] = []
-    for (label_name, start, end), key in zip(overlapping, regimes_raw.keys()):
-        seg = regimes_raw[key]
-        # Sample size = rows in the segment after label join
+    for label_name, start, end in overlapping:
+        key = f"{start}__{end}"
+        seg = regimes_raw.get(key)
+        if seg is None:
+            # Segment had no overlapping data; skip rather than emit zeros.
+            continue
         mask = (
             (pred.index.get_level_values("datetime") >= pd.Timestamp(start))
             & (pred.index.get_level_values("datetime") <= pd.Timestamp(end))
