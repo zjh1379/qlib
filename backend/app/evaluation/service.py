@@ -367,3 +367,81 @@ def _cache_quick_look(recorder_id: str) -> tuple[float | None, float | None, boo
     if res is None:
         return (None, None, None)
     return (res.scorecard.ic_mean, res.scorecard.ir, res.acceptance.passed)
+
+
+def compare_recorders(
+    recorder_id_a: str,
+    recorder_id_b: str,
+    top_k: int = 30,
+    cost_bps: float = 10.0,
+) -> "CompareResult":
+    """Side-by-side eval of 2 recorders + paired t-test on their daily IC series.
+
+    Uses the cached evaluate_recorder() under the hood. If either recorder
+    hasn't been evaluated yet, this triggers a (potentially slow) first eval.
+
+    Verdict logic:
+        - paired t-test p < 0.05 AND ic_delta > 0  -> "b significantly better"
+        - paired t-test p < 0.05 AND ic_delta < 0  -> "a significantly better"
+        - otherwise                                -> "no significant difference"
+    """
+    from production.metrics import paired_ttest
+    from app.evaluation.schemas import CompareResult
+
+    result_a = evaluate_recorder(recorder_id_a, top_k=top_k, cost_bps=cost_bps)
+    result_b = evaluate_recorder(recorder_id_b, top_k=top_k, cost_bps=cost_bps)
+
+    # Compute daily IC series for both, on the OVERLAPPING date range
+    daily_ic_a = _daily_ic_for_recorder(recorder_id_a)
+    daily_ic_b = _daily_ic_for_recorder(recorder_id_b)
+    if len(daily_ic_a) == 0 or len(daily_ic_b) == 0:
+        # No overlapping data — t-test undefined
+        t_stat, p_value, significant = float("nan"), 1.0, False
+    else:
+        try:
+            t_stat, p_value = paired_ttest(daily_ic_a, daily_ic_b)
+        except Exception:
+            t_stat, p_value = float("nan"), 1.0
+        significant = p_value < 0.05
+
+    ic_delta = result_b.scorecard.ic_mean - result_a.scorecard.ic_mean
+    ir_delta = result_b.scorecard.ir - result_a.scorecard.ir
+
+    if significant and ic_delta > 0:
+        verdict = "b significantly better"
+    elif significant and ic_delta < 0:
+        verdict = "a significantly better"
+    else:
+        verdict = "no significant difference"
+
+    return CompareResult(
+        a=result_a,
+        b=result_b,
+        paired_t_stat=float(t_stat) if pd.notna(t_stat) else 0.0,
+        paired_p_value=float(p_value),
+        significant_at_05=bool(significant),
+        ic_delta=float(ic_delta),
+        ir_delta=float(ir_delta),
+        verdict=verdict,
+    )
+
+
+def _daily_ic_for_recorder(recorder_id: str) -> pd.Series:
+    """Recompute the daily IC time series for a recorder.
+
+    Returns a Series indexed by date with one IC value per day. Used by
+    paired_ttest in compare_recorders.
+    """
+    exp_name = _experiment_for_recorder(recorder_id)
+    if exp_name is None:
+        return pd.Series(dtype="float64")
+    pred = _load_pred_as_series(recorder_id, exp_name)
+    if pred.empty:
+        return pd.Series(dtype="float64")
+    labels = _fetch_open_to_open_labels(pred)
+
+    import numpy as np
+    df = pd.concat([pred.rename("p"), labels.rename("y")], axis=1).dropna()
+    return df.groupby(level="datetime").apply(
+        lambda g: g["p"].corr(g["y"]) if len(g) > 2 else np.nan
+    ).dropna()

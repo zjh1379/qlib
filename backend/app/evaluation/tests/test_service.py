@@ -112,3 +112,46 @@ def test_regime_labels_align_when_some_segments_empty(qlib_ready):
             spec = next(seg for seg in _REGIME_SEGMENTS if seg[0] == r.label)
             assert (r.start, r.end) == (spec[1], spec[2]), \
                 f"regime {r.label}: dates {r.start}..{r.end} don't match spec {spec[1]}..{spec[2]}"
+
+
+from app.evaluation.service import compare_recorders
+
+
+def test_compare_same_recorder_against_itself(qlib_ready):
+    summaries = list_recorders_with_summary()
+    target = next((s for s in summaries if s.experiment == "daily_cn_fresh"), None)
+    if target is None:
+        pytest.skip("no daily_cn_fresh recorder")
+
+    cmp = compare_recorders(target.recorder_id, target.recorder_id)
+    # IC delta and IR delta must be zero (same recorder)
+    assert abs(cmp.ic_delta) < 1e-9
+    assert abs(cmp.ir_delta) < 1e-9
+    # Paired t-test on identical series: t = nan or 0; p ≈ 1
+    # Just assert the verdict says no significant difference
+    assert cmp.significant_at_05 is False
+    assert "no significant difference" in cmp.verdict.lower()
+
+
+def test_compare_different_recorders_returns_full_eval(qlib_ready):
+    summaries = list_recorders_with_summary()
+    # We need two distinct recorders; if there's only one, skip.
+    if len(summaries) < 2:
+        pytest.skip("need >=2 recorders to compare")
+    a = summaries[0].recorder_id
+    b = summaries[1].recorder_id
+    if a == b:
+        pytest.skip("first two recorders are identical")
+
+    cmp = compare_recorders(a, b)
+    assert cmp.a.recorder_id == a
+    assert cmp.b.recorder_id == b
+    # IC delta = b.ic_mean - a.ic_mean (per schema)
+    assert cmp.ic_delta == pytest.approx(cmp.b.scorecard.ic_mean - cmp.a.scorecard.ic_mean, abs=1e-9)
+    assert cmp.ir_delta == pytest.approx(cmp.b.scorecard.ir - cmp.a.scorecard.ir, abs=1e-9)
+    # verdict is one of 3 expected strings
+    assert cmp.verdict in (
+        "b significantly better",
+        "a significantly better",
+        "no significant difference",
+    )
