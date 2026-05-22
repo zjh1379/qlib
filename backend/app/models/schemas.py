@@ -2,16 +2,25 @@ from pydantic import BaseModel, Field
 
 
 class ScreenItem(BaseModel):
-    rank: int                       # 1-based, by score_avg desc
+    rank: int
     symbol: str
     name: str = ""
-    score_today: float              # latest day's raw score
-    score_avg: float                # mean score over `days` window
-    rank_avg: float                 # mean cross-sectional rank over `days` window (lower = better)
-    days_in_top: int                # how many of the `days` window days this symbol was in top-N
+    score_today: float
+    score_avg: float
+    rank_avg: float
+    days_in_top: int
     consensus: float = 0.0
     base_scores: dict[str, float] = Field(default_factory=dict)
-    last_price: float | None = None  # most recent close in CNY; None if data unavailable
+    last_price: float | None = None
+
+    # Tier 1 screener metrics (T3) — exposed to the UI for at-a-glance display
+    # and to drive client-side highlights. Server-side multi-N pct_change values
+    # used by filters are NOT serialized; only the canonical 5d is surfaced.
+    pct_change_5d: float | None = None
+    amplitude: float | None = None
+    vol_ratio: float | None = None
+    board: str | None = None  # main | gem | star | bj | etf | other
+    is_st: bool = False
 
 
 class ScreenResponse(BaseModel):
