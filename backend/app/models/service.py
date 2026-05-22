@@ -1,3 +1,5 @@
+import functools
+
 import pandas as pd
 
 from app.core.config import Settings
@@ -105,6 +107,110 @@ def _passes_price(price: float | None, lo: float | None, hi: float | None) -> bo
     if hi is not None and price > hi:
         return False
     return True
+
+
+def candidates(
+    top: int = 300,
+    days: int = 5,
+    min_top: int = 0,
+    experiment: str | None = None,
+    view: str = "ensemble",
+) -> dict:
+    """Return the full candidate pool (over-fetched, no filters) with complete
+    Tier 1 metrics, cached per (recorder_id, view, top, days, min_top).
+
+    Frontend pulls this ONCE per session/view and does filter + sort
+    client-side. Cache invalidates automatically when a new recorder is trained
+    (recorder_id is part of the key) or on backend restart.
+    """
+    init_qlib_once()
+    s = Settings()
+    exp = experiment or s.default_experiment
+    recorder_id = get_latest_recorder_id(exp)
+    cached = _candidates_cached(recorder_id, exp, view, top, days, min_top)
+    # Return a shallow copy so callers can mutate without poisoning the cache.
+    return {**cached, "items": list(cached["items"])}
+
+
+@functools.lru_cache(maxsize=16)
+def _candidates_cached(
+    recorder_id: str,
+    exp: str,
+    view: str,
+    top: int,
+    days: int,
+    min_top: int,
+) -> dict:
+    """Heavy path: load pred.pkl, build screen items, fetch full metrics, populate
+    all schema fields. Cached by lru_cache; do NOT call directly — use candidates()."""
+    from app.core.qlib_adapter import get_filter_metrics
+    from app.models.utils import is_st_name, parse_board
+
+    pred = load_pred(recorder_id, experiment_name=exp)
+
+    if isinstance(pred, pd.Series):
+        df = pred.to_frame(name="score")
+    else:
+        df = pred.copy()
+        if "score" not in df.columns:
+            if df.shape[1] == 1:
+                df = df.rename(columns={df.columns[0]: "score"})
+            else:
+                raise ValueError("pred frame missing 'score' column")
+
+    if df.index.names != ["datetime", "instrument"]:
+        df.index = df.index.set_names(["datetime", "instrument"])
+
+    if view != "ensemble":
+        _view_prefix = {"lightgbm": "lgbm_", "alstm": "alstm_", "tra": "tra_"}
+        prefix = _view_prefix.get(view, f"{view}_")
+        view_cols = [c for c in df.columns if c.startswith(prefix)]
+        if view_cols:
+            df = df.copy()
+            df["score"] = df[view_cols].mean(axis=1)
+
+    dates = df.index.get_level_values("datetime").unique().sort_values()
+    today = dates[-1]
+    last_slice = df.xs(today, level="datetime")
+    universe_size = int(last_slice["score"].count())
+
+    name_map = _name_map()
+    items = _build_screen_items(df, top=top, days=days, min_top=min_top, name_map=name_map)
+
+    if items:
+        prices = get_latest_close_prices([it.symbol for it in items])
+        metrics = get_filter_metrics([it.symbol for it in items])
+        for it in items:
+            it.last_price = prices.get(it.symbol)
+            m = metrics.get(it.symbol, {})
+            it.pct_change_1d = m.get("pct_change_1d")
+            it.pct_change_3d = m.get("pct_change_3d")
+            it.pct_change_5d = m.get("pct_change_5d")
+            it.pct_change_10d = m.get("pct_change_10d")
+            it.pct_change_20d = m.get("pct_change_20d")
+            it.amplitude = m.get("amplitude")
+            it.vol_ratio = m.get("vol_ratio")
+            it.is_new_high_20d = bool(m.get("is_new_high_20d", False))
+            it.is_new_high_60d = bool(m.get("is_new_high_60d", False))
+            it.is_new_high_120d = bool(m.get("is_new_high_120d", False))
+            it.board = parse_board(it.symbol)
+            it.is_st = is_st_name(it.name)
+
+    return {
+        "experiment": exp,
+        "recorder_id": recorder_id,
+        "latest_date": str(today.date()),
+        "window_days": days,
+        "universe_size": universe_size,
+        "items": [it.model_dump() for it in items],
+    }
+
+
+def invalidate_candidates_cache() -> int:
+    """Clear the lru_cache. Returns number of entries that were cleared."""
+    info = _candidates_cached.cache_info()
+    _candidates_cached.cache_clear()
+    return info.currsize
 
 
 def screen(

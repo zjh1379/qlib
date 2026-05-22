@@ -13,12 +13,18 @@ class ScreenItem(BaseModel):
     base_scores: dict[str, float] = Field(default_factory=dict)
     last_price: float | None = None
 
-    # Tier 1 screener metrics (T3) — exposed to the UI for at-a-glance display
-    # and to drive client-side highlights. Server-side multi-N pct_change values
-    # used by filters are NOT serialized; only the canonical 5d is surfaced.
+    # Tier 1 screener metrics — exposed to UI for at-a-glance display
+    # AND for client-side filtering/sorting (no backend re-fetch on filter change).
+    pct_change_1d: float | None = None
+    pct_change_3d: float | None = None
     pct_change_5d: float | None = None
+    pct_change_10d: float | None = None
+    pct_change_20d: float | None = None
     amplitude: float | None = None
     vol_ratio: float | None = None
+    is_new_high_20d: bool = False
+    is_new_high_60d: bool = False
+    is_new_high_120d: bool = False
     board: str | None = None  # main | gem | star | bj | etf | other
     is_st: bool = False
 
@@ -27,6 +33,17 @@ class ScreenResponse(BaseModel):
     experiment: str
     recorder_id: str
     latest_date: str                # ISO date of last prediction day
+    window_days: int
+    universe_size: int
+    items: list[ScreenItem]
+
+
+class CandidatesResponse(BaseModel):
+    """Same shape as ScreenResponse; semantically a 'no filters applied' candidate pool
+    intended for client-side filter + sort. Returned by GET /api/models/candidates."""
+    experiment: str
+    recorder_id: str
+    latest_date: str
     window_days: int
     universe_size: int
     items: list[ScreenItem]

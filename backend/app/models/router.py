@@ -3,6 +3,7 @@ from fastapi import APIRouter, Query
 from app.core.exceptions import BusinessError
 from app.models import service
 from app.models.schemas import (
+    CandidatesResponse,
     ExperimentsResponse,
     PredictionHistory,
     RollbackRequest,
@@ -86,3 +87,19 @@ def version():
 @router.post("/rollback", response_model=RollbackResponse)
 def rollback(payload: RollbackRequest):
     return service.rollback_to(target=payload.target)
+
+
+@router.get("/candidates", response_model=CandidatesResponse)
+def candidates_endpoint(
+    top: int = Query(default=300, ge=1, le=500),
+    days: int = Query(default=5, ge=1, le=60),
+    min_top: int = Query(default=0, ge=0),
+    experiment: str | None = Query(default=None),
+    view: str = Query(default="ensemble", pattern="^(ensemble|lightgbm|alstm|tra)$"),
+):
+    """Return the full candidate pool (cached per recorder + view + base params).
+    Frontend fetches this ONCE, then applies filter + sort client-side. No filter
+    query params here — Tier 1 filters apply in the browser."""
+    return service.candidates(
+        top=top, days=days, min_top=min_top, experiment=experiment, view=view
+    )
