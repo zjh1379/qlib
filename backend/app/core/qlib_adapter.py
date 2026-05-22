@@ -115,6 +115,103 @@ def get_latest_close_prices(symbols: list[str], lookback_days: int = 10) -> dict
     return out
 
 
+def get_filter_metrics(
+    symbols: list[str],
+    end_date: date | None = None,
+    lookback_days: int = 200,
+) -> dict[str, dict]:
+    """Batch-compute Tier 1 filter metrics for a set of symbols in one qlib call.
+
+    Returned dict per symbol:
+        {
+          "last_close": float,
+          "pct_change_1d": float,    # (close_T / close_T-1) - 1
+          "pct_change_3d": float,
+          "pct_change_5d": float,
+          "pct_change_10d": float,
+          "pct_change_20d": float,
+          "amplitude": float,        # (high_T - low_T) / close_T-1
+          "vol_ratio": float,        # vol_T / mean(vol_T-1..T-5)
+          "is_new_high_20d": bool,   # close_T == max(close, T-19..T)
+          "is_new_high_60d": bool,
+          "is_new_high_120d": bool,
+        }
+
+    Symbols with insufficient history (e.g. listed within `lookback_days`) are
+    returned with NaN-safe defaults: the relevant pct_change_N becomes 0 and
+    new-high flags become False. last_close is always populated when the symbol
+    has any OHLCV in the window; otherwise the symbol is omitted from the result.
+    """
+    init_qlib_once()
+    if not symbols:
+        return {}
+    if end_date is None:
+        end_date = get_calendar_end()
+    start_date = end_date - timedelta(days=lookback_days)
+
+    try:
+        df = D.features(
+            instruments=symbols,
+            fields=["$open", "$high", "$low", "$close", "$volume"],
+            start_time=start_date.isoformat(),
+            end_time=end_date.isoformat(),
+        )
+    except Exception as exc:
+        _log.warning("filter_metrics_fetch_failed error=%s", str(exc))
+        return {}
+    if df is None or df.empty:
+        return {}
+
+    out: dict[str, dict] = {}
+    for inst, group in df.groupby(level="instrument"):
+        g = group.dropna(subset=["$close"])
+        if g.empty:
+            continue
+        closes = g["$close"].to_numpy()
+        highs = g["$high"].to_numpy()
+        lows = g["$low"].to_numpy()
+        vols = g["$volume"].to_numpy()
+        last = closes[-1]
+
+        def _pct_n(n: int) -> float:
+            if len(closes) <= n:
+                return 0.0
+            prev = closes[-1 - n]
+            return float((last / prev) - 1.0) if prev > 0 else 0.0
+
+        amp = 0.0
+        if len(closes) >= 2 and closes[-2] > 0:
+            amp = float((highs[-1] - lows[-1]) / closes[-2])
+
+        vol_ratio = 0.0
+        if len(vols) >= 6:
+            past5_mean = vols[-6:-1].mean()
+            if past5_mean > 0:
+                vol_ratio = float(vols[-1] / past5_mean)
+
+        def _is_new_high(n: int) -> bool:
+            if len(closes) < n:
+                return False
+            window = closes[-n:]
+            # Use a tiny epsilon to absorb float noise
+            return bool(last + 1e-9 >= window.max())
+
+        out[inst] = {
+            "last_close": float(last),
+            "pct_change_1d": _pct_n(1),
+            "pct_change_3d": _pct_n(3),
+            "pct_change_5d": _pct_n(5),
+            "pct_change_10d": _pct_n(10),
+            "pct_change_20d": _pct_n(20),
+            "amplitude": amp,
+            "vol_ratio": vol_ratio,
+            "is_new_high_20d": _is_new_high(20),
+            "is_new_high_60d": _is_new_high(60),
+            "is_new_high_120d": _is_new_high(120),
+        }
+    return out
+
+
 def get_calendar_end() -> date:
     init_qlib_once()
     cal = D.calendar(freq="day")
