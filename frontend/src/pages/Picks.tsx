@@ -8,7 +8,7 @@ import type { FilterParams } from './picks/types';
 export default function Picks() {
   const [params, update, reset] = useFilterParams();
 
-  const { data, isPending, error } = useScreen(toQueryParams(params));
+  const { data, isPending, isFetching, error } = useScreen(toQueryParams(params));
 
   const filteredItems = data
     ? data.items.filter((it) => (it.consensus ?? 0) >= params.min_consensus)
@@ -41,9 +41,11 @@ export default function Picks() {
         ) : isPending ? (
           <div className="text-[#8b949e] text-sm">加载中…</div>
         ) : data && filteredItems.length === 0 ? (
-          <div className="text-[#8b949e] text-sm">没有符合条件的股票 — 试试放宽 [最高单价] 或 [板块] 筛选。</div>
+          <EmptyState params={params} totalCandidates={data.items.length} />
         ) : data ? (
-          <ResultsTable items={filteredItems} />
+          <div className={cn('relative transition-opacity', isFetching ? 'opacity-60' : '')}>
+            <ResultsTable items={filteredItems} />
+          </div>
         ) : null}
       </div>
 
@@ -162,3 +164,26 @@ function consensusColorClass(v: number): string {
   if (v >= 0.44) return 'text-yellow-400';
   return 'text-[#8b949e]';
 }
+
+function EmptyState({ params, totalCandidates }: { params: FilterParams; totalCandidates: number }) {
+  const culprits: string[] = [];
+  if (params.max_price !== null && params.max_price < 100) culprits.push('最高单价');
+  if (params.boards.length > 0 && params.boards.length < BOARDS_COUNT) culprits.push('板块多选');
+  if (params.new_high_n !== 0) culprits.push('创 N 日新高');
+  if (params.min_pct_change !== null && params.min_pct_change > 0) culprits.push('涨跌幅 min');
+  if (params.min_vol_ratio !== null && params.min_vol_ratio > 1) culprits.push('量比 min');
+  if (params.min_consensus > 0.5) culprits.push('最低共识');
+
+  return (
+    <div className="text-sm text-[#8b949e]">
+      <p>没有符合条件的股票 ({totalCandidates} 候选都被筛掉)。</p>
+      {culprits.length > 0 && (
+        <p className="mt-2">
+          可能太严的筛选: <span className="text-yellow-400">{culprits.join(' · ')}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+const BOARDS_COUNT = 5; // main / gem / star / bj / etf
