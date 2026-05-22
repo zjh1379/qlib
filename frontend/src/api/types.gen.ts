@@ -279,6 +279,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Candidates Endpoint
+         * @description Return the full candidate pool (cached per recorder + view + base params).
+         *     Frontend fetches this ONCE, then applies filter + sort client-side. No filter
+         *     query params here — Tier 1 filters apply in the browser.
+         */
+        get: operations["candidates_endpoint_api_models_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduling/retrain": {
         parameters: {
             query?: never;
@@ -314,6 +336,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/{full_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve Spa */
+        get: operations["serve_spa__full_path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -334,6 +373,25 @@ export interface components {
             fetched_rows: number;
             /** Message */
             message: string;
+        };
+        /**
+         * CandidatesResponse
+         * @description Same shape as ScreenResponse; semantically a 'no filters applied' candidate pool
+         *     intended for client-side filter + sort. Returned by GET /api/models/candidates.
+         */
+        CandidatesResponse: {
+            /** Experiment */
+            experiment: string;
+            /** Recorder Id */
+            recorder_id: string;
+            /** Latest Date */
+            latest_date: string;
+            /** Window Days */
+            window_days: number;
+            /** Universe Size */
+            universe_size: number;
+            /** Items */
+            items: components["schemas"]["ScreenItem"][];
         };
         /** CandleBar */
         CandleBar: {
@@ -722,12 +780,35 @@ export interface components {
             };
             /** Last Price */
             last_price?: number | null;
+            /** Pct Change 1D */
+            pct_change_1d?: number | null;
+            /** Pct Change 3D */
+            pct_change_3d?: number | null;
             /** Pct Change 5D */
             pct_change_5d?: number | null;
+            /** Pct Change 10D */
+            pct_change_10d?: number | null;
+            /** Pct Change 20D */
+            pct_change_20d?: number | null;
             /** Amplitude */
             amplitude?: number | null;
             /** Vol Ratio */
             vol_ratio?: number | null;
+            /**
+             * Is New High 20D
+             * @default false
+             */
+            is_new_high_20d: boolean;
+            /**
+             * Is New High 60D
+             * @default false
+             */
+            is_new_high_60d: boolean;
+            /**
+             * Is New High 120D
+             * @default false
+             */
+            is_new_high_120d: boolean;
             /** Board */
             board?: string | null;
             /**
@@ -1412,6 +1493,41 @@ export interface operations {
             };
         };
     };
+    candidates_endpoint_api_models_candidates_get: {
+        parameters: {
+            query?: {
+                top?: number;
+                days?: number;
+                min_top?: number;
+                experiment?: string | null;
+                view?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidatesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_schedule_api_scheduling_retrain_get: {
         parameters: {
             query?: never;
@@ -1483,6 +1599,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunNowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    serve_spa__full_path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                full_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

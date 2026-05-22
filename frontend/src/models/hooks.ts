@@ -37,3 +37,21 @@ export function usePredictionHistory(symbol: string, days = 60) {
     staleTime: 5 * 60_000,
   });
 }
+
+export function useCandidates(
+  params: {
+    top?: number;
+    days?: number;
+    min_top?: number;
+    view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
+  } = {},
+) {
+  return useQuery({
+    queryKey: ['models', 'candidates', params],
+    queryFn: () => api.models.candidates(params),
+    staleTime: Infinity,         // Candidates rarely change within a session.
+    gcTime: 30 * 60_000,         // Keep in memory for 30 min after last use.
+    refetchOnWindowFocus: false, // Don't refetch when window regains focus.
+    placeholderData: (prev) => prev,
+  });
+}
