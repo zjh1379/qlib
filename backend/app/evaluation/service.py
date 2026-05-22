@@ -150,13 +150,217 @@ def _find_exp_id_for_name(exp_name: str) -> str | None:
     return None
 
 
-# Cache helpers — wired in Task 3 once evaluate_recorder exists.
+import functools
+from datetime import datetime, timezone
+
+from qlib.workflow import R as _R
+from qlib.data import D as _D
+
+from app.evaluation.schemas import (
+    AcceptanceResult,
+    EvalResult,
+    RegimeMetrics,
+    ScorecardData,
+)
+
+# Spec §8 multi-regime segments. evaluate_recorder filters to those overlapping
+# the recorder's prediction window; for recent-only recorders (e.g. 2025+) we
+# always synthesize a "Recent" segment covering the full window.
+_REGIME_SEGMENTS: list[tuple[str, str, str]] = [
+    ("2018 Bear", "2018-01-01", "2018-12-31"),
+    ("2019-20 Recovery", "2019-01-01", "2020-02-28"),
+    ("2020-21 COVID liquidity", "2020-03-01", "2021-02-28"),
+    ("2021-22 High vol", "2021-03-01", "2022-10-31"),
+    ("2022-24 AI rally", "2022-11-01", "2024-12-31"),
+]
+
+# Sidecar maps populated by evaluate_recorder() so list view can show
+# "已评估" status + quick-look IC/IR. Cleared on force_refresh.
+_CACHE_SEEN: set[str] = set()
+_CACHE_RESULTS: dict[str, EvalResult] = {}
+
+
+def evaluate_recorder(
+    recorder_id: str,
+    top_k: int = 30,
+    cost_bps: float = 10.0,
+    force_refresh: bool = False,
+) -> EvalResult:
+    """Run the full 8-metric scorecard + regime split + acceptance check.
+
+    Results cached in-process by (recorder_id, top_k, cost_bps).
+    `force_refresh=True` clears the entire cache and recomputes.
+    """
+    if force_refresh:
+        _evaluate_cached.cache_clear()
+        _CACHE_SEEN.clear()
+        _CACHE_RESULTS.clear()
+    result = _evaluate_cached(recorder_id, top_k, cost_bps)
+    _CACHE_SEEN.add(recorder_id)
+    _CACHE_RESULTS[recorder_id] = result
+    return result
+
+
+@functools.lru_cache(maxsize=32)
+def _evaluate_cached(recorder_id: str, top_k: int, cost_bps: float) -> EvalResult:
+    """Heavy path: load pred.pkl, fetch labels, compute scorecard + regimes."""
+    from production.metrics import compute_scorecard, regime_split
+    from production.validate_acceptance import check_acceptance
+
+    init_qlib_once()
+    exp_name = _experiment_for_recorder(recorder_id)
+    if exp_name is None:
+        raise ValueError(f"recorder {recorder_id} not found in any experiment")
+
+    pred = _load_pred_as_series(recorder_id, exp_name)
+    if pred.empty:
+        raise ValueError(f"recorder {recorder_id}: pred.pkl empty or missing")
+
+    labels = _fetch_open_to_open_labels(pred)
+
+    # Run scorecard
+    scorecard_dict = compute_scorecard(pred, labels, top_k=top_k, bps=cost_bps)
+    scorecard = ScorecardData(**scorecard_dict)
+
+    # Regime split — only segments overlapping the prediction range, plus a Recent catch-all
+    overlapping = _overlapping_regimes(pred)
+    regimes_raw = regime_split(pred, labels, [(s, e) for _, s, e in overlapping])
+    regimes: list[RegimeMetrics] = []
+    for (label_name, start, end), key in zip(overlapping, regimes_raw.keys()):
+        seg = regimes_raw[key]
+        # Sample size = rows in the segment after label join
+        mask = (
+            (pred.index.get_level_values("datetime") >= pd.Timestamp(start))
+            & (pred.index.get_level_values("datetime") <= pd.Timestamp(end))
+        )
+        regimes.append(
+            RegimeMetrics(
+                label=label_name,
+                start=start,
+                end=end,
+                sample_size=int(mask.sum()),
+                scorecard=ScorecardData(**seg),
+            )
+        )
+
+    regime_irs = {r.label: r.scorecard.ir for r in regimes}
+    acceptance_dict = check_acceptance(scorecard_dict, regime_irs)
+    acceptance = AcceptanceResult(**acceptance_dict)
+
+    # Compute the actual evaluation window from labels (post-join)
+    joined_dates = (
+        pd.concat([pred.rename("p"), labels.rename("y")], axis=1).dropna()
+        .index.get_level_values("datetime")
+    )
+    window_start = str(joined_dates.min().date()) if len(joined_dates) else ""
+    window_end = str(joined_dates.max().date()) if len(joined_dates) else ""
+
+    rec = _R.get_recorder(recorder_id=recorder_id, experiment_name=exp_name)
+    run_name = rec.info.get("name", recorder_id[:8])
+
+    return EvalResult(
+        recorder_id=recorder_id,
+        experiment=exp_name,
+        run_name=run_name,
+        computed_at=datetime.now(timezone.utc).isoformat(),
+        window_start=window_start,
+        window_end=window_end,
+        sample_size=len(joined_dates),
+        top_k=top_k,
+        cost_bps=cost_bps,
+        scorecard=scorecard,
+        regimes=regimes,
+        acceptance=acceptance,
+    )
+
+
+def _experiment_for_recorder(recorder_id: str) -> str | None:
+    """Find which experiment owns this recorder_id."""
+    for exp_id in _list_experiment_ids():
+        rec_dir = Settings().mlruns_path / exp_id / recorder_id
+        if rec_dir.is_dir():
+            return _experiment_name(exp_id)
+    return None
+
+
+def _load_pred_as_series(recorder_id: str, exp_name: str) -> pd.Series:
+    """Load pred.pkl (or pred_5d.pkl etc.) as a 1-col Series indexed by (datetime, instrument).
+    For multi-column DataFrames (ensemble output), uses the 'score' column."""
+    exp_id = _find_exp_id_for_name(exp_name)
+    if exp_id is None:
+        return pd.Series(dtype="float64")
+    artifacts = Settings().mlruns_path / exp_id / recorder_id / "artifacts"
+    candidates = [artifacts / "pred.pkl", artifacts / "pred_5d.pkl",
+                  artifacts / "pred_1d.pkl", artifacts / "pred_20d.pkl"]
+    for c in candidates:
+        if not c.exists():
+            continue
+        df = pd.read_pickle(c)
+        if isinstance(df, pd.Series):
+            return _ensure_index(df.rename("score"))
+        if "score" in df.columns:
+            return _ensure_index(df["score"])
+        return _ensure_index(df.iloc[:, 0])
+    return pd.Series(dtype="float64")
+
+
+def _ensure_index(s: pd.Series) -> pd.Series:
+    if s.index.names != ["datetime", "instrument"]:
+        s.index = s.index.set_names(["datetime", "instrument"])
+    return s.sort_index()
+
+
+def _fetch_open_to_open_labels(pred: pd.Series) -> pd.Series:
+    """Pull Ref($open, -2) / Ref($open, -1) - 1 from qlib for the same
+    (date, symbol) range as pred. Returns a Series with the same index layout."""
+    symbols = sorted(pred.index.get_level_values("instrument").unique().tolist())
+    dates = pred.index.get_level_values("datetime")
+    start = (pd.Timestamp(dates.min()) - pd.Timedelta(days=5)).date()
+    end = (pd.Timestamp(dates.max()) + pd.Timedelta(days=10)).date()
+    df = _D.features(
+        instruments=symbols,
+        fields=["Ref($open, -2) / Ref($open, -1) - 1"],
+        start_time=str(start),
+        end_time=str(end),
+    )
+    df.columns = ["y"]
+    s = df["y"]
+    if s.index.names != ["datetime", "instrument"]:
+        # qlib usually returns (instrument, datetime); normalize.
+        s.index.names = ["instrument", "datetime"]
+        s = s.swaplevel().sort_index()
+    return s
+
+
+def _overlapping_regimes(pred: pd.Series) -> list[tuple[str, str, str]]:
+    """Return the spec regime segments whose [start, end] overlap the
+    prediction window. Always appends a 'Recent' synthetic segment covering
+    the full prediction window so recorders with only 2025+ predictions still
+    get something."""
+    dates = pred.index.get_level_values("datetime")
+    pred_start = pd.Timestamp(dates.min())
+    pred_end = pd.Timestamp(dates.max())
+    out: list[tuple[str, str, str]] = []
+    for label, start_s, end_s in _REGIME_SEGMENTS:
+        s = pd.Timestamp(start_s)
+        e = pd.Timestamp(end_s)
+        if e < pred_start or s > pred_end:
+            continue
+        out.append((label, start_s, end_s))
+    # Catch-all "Recent" segment over the whole prediction range
+    out.append(("Recent (full window)", str(pred_start.date()), str(pred_end.date())))
+    return out
+
+
 def _cache_has(recorder_id: str) -> bool:
-    """Return True iff evaluate_recorder has been called for this recorder
-    since process startup."""
-    return False
+    """True iff evaluate_recorder has been called for this recorder
+    since process startup (or last force_refresh)."""
+    return recorder_id in _CACHE_SEEN
 
 
 def _cache_quick_look(recorder_id: str) -> tuple[float | None, float | None, bool | None]:
-    """Pull (ic_mean, ir, acceptance_passed) from cache if present."""
-    return (None, None, None)
+    """If cached, return (ic_mean, ir, acceptance_passed) for the list view's quick column."""
+    res = _CACHE_RESULTS.get(recorder_id)
+    if res is None:
+        return (None, None, None)
+    return (res.scorecard.ic_mean, res.scorecard.ir, res.acceptance.passed)
