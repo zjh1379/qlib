@@ -94,6 +94,19 @@ def _build_screen_items(
     return items
 
 
+def _passes_price(price: float | None, lo: float | None, hi: float | None) -> bool:
+    """Inclusive price-range check; a None price fails any non-trivial bound."""
+    if lo is None and hi is None:
+        return True
+    if price is None:
+        return False
+    if lo is not None and price < lo:
+        return False
+    if hi is not None and price > hi:
+        return False
+    return True
+
+
 def screen(
     top: int = 30,
     days: int = 5,
@@ -102,67 +115,61 @@ def screen(
     view: str = "ensemble",
     min_price: float | None = None,
     max_price: float | None = None,
+    pct_change_n: int = 5,
+    min_pct_change: float | None = None,
+    max_pct_change: float | None = None,
+    min_amplitude: float | None = None,
+    max_amplitude: float | None = None,
+    min_vol_ratio: float | None = None,
+    max_vol_ratio: float | None = None,
+    new_high_n: int = 0,
+    boards: str | None = None,
+    exclude_st: bool = True,
 ) -> dict:
-    """
-    Rank the model's universe by 'score_avg over last `days` days', then filter by
-    'days_in_top >= min_top' if specified. Returns at most `top` items.
+    """Rank + filter the model's universe.
 
-    When `view` is not "ensemble", the unified `score` column is overridden with
-    the row-wise mean of the per-model base columns matching that view's prefix
-    (lightgbm -> lgbm_, alstm -> alstm_, tra -> tra_). Falls back to the
-    ensemble score if no matching base columns are present in the prediction
-    frame (e.g. old-shape pred.pkl).
+    Filter pipeline (AND semantics, applied to over-fetched candidates):
+      1. Existing: price range
+      2. Tier 1: pct_change_{pct_change_n}d in [min,max]
+      3. Tier 1: amplitude in [min,max]
+      4. Tier 1: vol_ratio in [min,max]
+      5. Tier 1: is_new_high_{new_high_n}d == True (if new_high_n != 0)
+      6. Tier 1: board in boards (OR within multiselect)
+      7. Tier 1: not is_st (if exclude_st)
 
-    Price filter (CNY per share, applied to most recent close):
-      - `min_price` / `max_price` are inclusive bounds; either may be None to
-        skip that side of the range.
-      - Symbols with no available price data are dropped when *any* price
-        filter is active; included with `last_price=None` otherwise.
-      - To accommodate filtering, we over-fetch candidates (top * 4, capped at
-        300) before filtering, then trim back to `top` for the response.
+    Symbols missing a metric fail any non-trivial bound on that metric.
+    Returned items are re-ranked 1..N after filtering.
     """
+    from app.core.qlib_adapter import get_filter_metrics
+    from app.models.utils import Tier1FilterSpec, apply_tier1_filters, is_st_name, parse_board
+
     init_qlib_once()
     s = Settings()
     exp = experiment or s.default_experiment
     recorder_id = get_latest_recorder_id(exp)
     pred = load_pred(recorder_id, experiment_name=exp)
 
-    # Normalize to DataFrame with a `score` column. Keep extra columns
-    # (consensus, base scores) if the new pred.pkl shape provides them.
     if isinstance(pred, pd.Series):
         df = pred.to_frame(name="score")
     else:
         df = pred.copy()
         if "score" not in df.columns:
-            # Defensive: if the prediction frame has no `score` column but has a
-            # single column, treat that as score. Otherwise this is malformed.
             if df.shape[1] == 1:
                 df = df.rename(columns={df.columns[0]: "score"})
             else:
                 raise ValueError("pred frame missing 'score' column")
 
-    # Ensure the index names match what _build_screen_items expects.
     if df.index.names != ["datetime", "instrument"]:
         df.index = df.index.set_names(["datetime", "instrument"])
 
-    # If a per-model view is requested, override `score` with the row-wise mean
-    # of the matching base columns. Map UI-friendly view names to the actual
-    # column prefix used in pred.pkl (lightgbm -> lgbm_*, etc.).
     if view != "ensemble":
-        _view_prefix = {
-            "lightgbm": "lgbm_",
-            "alstm": "alstm_",
-            "tra": "tra_",
-        }
+        _view_prefix = {"lightgbm": "lgbm_", "alstm": "alstm_", "tra": "tra_"}
         prefix = _view_prefix.get(view, f"{view}_")
         view_cols = [c for c in df.columns if c.startswith(prefix)]
         if view_cols:
             df = df.copy()
             df["score"] = df[view_cols].mean(axis=1)
-        # else: silently fall through to existing ensemble score (no per-model
-        # cols available — e.g. old-shape pred.pkl).
 
-    # Compute universe_size and last_day from the prediction frame.
     dates = df.index.get_level_values("datetime").unique().sort_values()
     today = dates[-1]
     last_slice = df.xs(today, level="datetime")
@@ -170,11 +177,18 @@ def screen(
 
     name_map = _name_map()
 
-    # Over-fetch when a price filter is active so we still have enough rows
-    # to return `top` items after filtering. Cap at 300 to bound qlib I/O.
-    price_filter_active = (min_price is not None) or (max_price is not None)
-    fetch_top = min(top * 4, 300) if price_filter_active else top
-
+    # Decide whether any expensive filter is active so we know whether to
+    # over-fetch and run the metric pipeline.
+    tier1_active = (
+        min_price is not None or max_price is not None
+        or min_pct_change is not None or max_pct_change is not None
+        or min_amplitude is not None or max_amplitude is not None
+        or min_vol_ratio is not None or max_vol_ratio is not None
+        or new_high_n != 0
+        or boards is not None
+        or exclude_st
+    )
+    fetch_top = min(top * 4, 300) if tier1_active else top
     items = _build_screen_items(df, top=fetch_top, days=days, min_top=min_top, name_map=name_map)
 
     if items:
@@ -182,21 +196,71 @@ def screen(
         for it in items:
             it.last_price = prices.get(it.symbol)
 
-    if price_filter_active:
-        def _in_range(price: float | None) -> bool:
-            if price is None:
-                return False
-            if min_price is not None and price < min_price:
-                return False
-            if max_price is not None and price > max_price:
-                return False
-            return True
+        # Compute metrics + board + ST flags for every candidate
+        metrics = get_filter_metrics([it.symbol for it in items])
+        for it in items:
+            m = metrics.get(it.symbol, {})
+            it.pct_change_5d = m.get("pct_change_5d")
+            it.amplitude = m.get("amplitude")
+            it.vol_ratio = m.get("vol_ratio")
+            it.board = parse_board(it.symbol)
+            it.is_st = is_st_name(it.name)
+            # Stash multi-N metrics in a transient dict so the filter pipeline
+            # can read them without needing per-N schema fields.
+            it.__dict__["_metrics"] = m
 
-        items = [it for it in items if _in_range(it.last_price)]
-        # Re-rank 1..N after filtering so the displayed rank matches the table position.
-        for new_rank, it in enumerate(items[:top], start=1):
-            it.rank = new_rank
-        items = items[:top]
+    # Build filter spec
+    boards_set: set[str] | None = None
+    if boards:
+        boards_set = {b.strip() for b in boards.split(",") if b.strip()}
+
+    spec = Tier1FilterSpec(
+        pct_change_n=pct_change_n,
+        min_pct_change=min_pct_change, max_pct_change=max_pct_change,
+        min_amplitude=min_amplitude, max_amplitude=max_amplitude,
+        min_vol_ratio=min_vol_ratio, max_vol_ratio=max_vol_ratio,
+        new_high_n=new_high_n,
+        boards=boards_set,
+        exclude_st=exclude_st,
+    )
+
+    # Translate items -> dicts that apply_tier1_filters expects
+    rows: list[dict] = []
+    for it in items:
+        m = it.__dict__.get("_metrics", {})
+        rows.append({
+            "symbol": it.symbol,
+            "name": it.name,
+            "board": it.board,
+            "is_st": it.is_st,
+            "amplitude": it.amplitude,
+            "vol_ratio": it.vol_ratio,
+            "pct_change_1d": m.get("pct_change_1d"),
+            "pct_change_3d": m.get("pct_change_3d"),
+            "pct_change_5d": it.pct_change_5d,
+            "pct_change_10d": m.get("pct_change_10d"),
+            "pct_change_20d": m.get("pct_change_20d"),
+            "is_new_high_20d": m.get("is_new_high_20d", False),
+            "is_new_high_60d": m.get("is_new_high_60d", False),
+            "is_new_high_120d": m.get("is_new_high_120d", False),
+            "_item": it,
+        })
+
+    # Existing price filter (kept in service, not Tier1FilterSpec)
+    if min_price is not None or max_price is not None:
+        rows = [r for r in rows if _passes_price(r["_item"].last_price, min_price, max_price)]
+
+    # Tier 1 filters
+    rows = apply_tier1_filters(rows, spec)
+
+    # Re-rank and trim
+    filtered_items = [r["_item"] for r in rows[:top]]
+    for new_rank, it in enumerate(filtered_items, start=1):
+        it.rank = new_rank
+
+    # Strip transient metrics dict before serialization
+    for it in filtered_items:
+        it.__dict__.pop("_metrics", None)
 
     return {
         "experiment": exp,
@@ -204,7 +268,7 @@ def screen(
         "latest_date": str(today.date()),
         "window_days": days,
         "universe_size": universe_size,
-        "items": [it.model_dump() for it in items],
+        "items": [it.model_dump() for it in filtered_items],
     }
 
 

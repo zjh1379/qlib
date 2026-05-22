@@ -7,6 +7,7 @@ future scripts.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 # Code-segment to board mapping per CSRC market structure:
 #   60xxxx  / 90xxxx  -> 沪市主板 (Shanghai Main)
@@ -65,3 +66,62 @@ def is_st_name(name: str) -> bool:
         if rest and not rest[0].isascii():
             return True
     return False
+
+
+@dataclass
+class Tier1FilterSpec:
+    pct_change_n: int = 5
+    min_pct_change: float | None = None
+    max_pct_change: float | None = None
+    min_amplitude: float | None = None
+    max_amplitude: float | None = None
+    min_vol_ratio: float | None = None
+    max_vol_ratio: float | None = None
+    new_high_n: int = 0  # 0 = off
+    boards: set[str] | None = None  # None = no board filter; set means OR within boards
+    exclude_st: bool = True
+
+
+def _passes_range(value: float | None, lo: float | None, hi: float | None) -> bool:
+    """Inclusive range check that treats either bound as 'unbounded' when None.
+    A None value (e.g. metric not available) fails any non-None bound."""
+    if lo is None and hi is None:
+        return True
+    if value is None:
+        return False
+    if lo is not None and value < lo:
+        return False
+    if hi is not None and value > hi:
+        return False
+    return True
+
+
+def apply_tier1_filters(
+    rows: list[dict],
+    spec: Tier1FilterSpec,
+) -> list[dict]:
+    """Apply Tier 1 filters with AND semantics. Each row must carry the metric
+    fields produced by qlib_adapter.get_filter_metrics + a 'symbol' + 'name' + 'board'.
+
+    Returns the rows that pass every filter, in input order.
+    """
+    out: list[dict] = []
+    pct_key = f"pct_change_{spec.pct_change_n}d"
+    for r in rows:
+        if not _passes_range(r.get(pct_key), spec.min_pct_change, spec.max_pct_change):
+            continue
+        if not _passes_range(r.get("amplitude"), spec.min_amplitude, spec.max_amplitude):
+            continue
+        if not _passes_range(r.get("vol_ratio"), spec.min_vol_ratio, spec.max_vol_ratio):
+            continue
+        if spec.new_high_n != 0:
+            key = f"is_new_high_{spec.new_high_n}d"
+            if not r.get(key, False):
+                continue
+        if spec.boards is not None and len(spec.boards) > 0:
+            if r.get("board") not in spec.boards:
+                continue
+        if spec.exclude_st and r.get("is_st", False):
+            continue
+        out.append(r)
+    return out
