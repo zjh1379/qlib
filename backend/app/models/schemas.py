@@ -11,6 +11,7 @@ class ScreenItem(BaseModel):
     days_in_top: int                # how many of the `days` window days this symbol was in top-N
     consensus: float = 0.0
     base_scores: dict[str, float] = Field(default_factory=dict)
+    last_price: float | None = None  # most recent close in CNY; None if data unavailable
 
 
 class ScreenResponse(BaseModel):

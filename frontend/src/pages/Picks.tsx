@@ -18,8 +18,18 @@ export default function Picks() {
   const [minTop, setMinTop] = useState(0);
   const [view, setView] = useState<View>('ensemble');
   const [minConsensus, setMinConsensus] = useState(0);
+  // Price filter — empty string means no bound. Default to a 30 CNY ceiling
+  // because the typical retail starter capital (3-4k CNY) can only afford
+  // 100-share lots up to ~30 CNY/share on A-shares.
+  const [minPriceStr, setMinPriceStr] = useState<string>('');
+  const [maxPriceStr, setMaxPriceStr] = useState<string>('30');
 
-  const { data, isPending, error } = useScreen({ top, days, min_top: minTop, view });
+  const min_price = minPriceStr === '' ? null : Number(minPriceStr);
+  const max_price = maxPriceStr === '' ? null : Number(maxPriceStr);
+
+  const { data, isPending, error } = useScreen({
+    top, days, min_top: minTop, view, min_price, max_price,
+  });
 
   const filteredItems = data
     ? data.items.filter((it) => (it.consensus ?? 0) >= minConsensus)
@@ -30,7 +40,7 @@ export default function Picks() {
       <header>
         <h1 className="text-2xl font-semibold">选股工作台</h1>
         <p className="text-sm text-[#8b949e] mt-1">
-          基于滚动重训集成模型的横截面打分排名 · 可切换视图查看单模型分
+          基于滚动重训集成模型的横截面打分排名 · 可切换视图、按价格区间筛选
         </p>
       </header>
 
@@ -39,7 +49,7 @@ export default function Picks() {
         <h2 className="text-sm font-semibold text-[#8b949e] uppercase tracking-wider mb-3">
           筛选
         </h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           <ViewSelect value={view} onChange={setView} />
           <NumberInput label="Top N" value={top} onChange={setTop} min={1} max={300} />
           <NumberInput label="窗口天数" value={days} onChange={setDays} min={1} max={60} />
@@ -50,8 +60,23 @@ export default function Picks() {
             min={0}
             max={days}
           />
+          <PriceInput
+            label="最低单价 (¥)"
+            value={minPriceStr}
+            onChange={setMinPriceStr}
+            placeholder="无下限"
+          />
+          <PriceInput
+            label="最高单价 (¥)"
+            value={maxPriceStr}
+            onChange={setMaxPriceStr}
+            placeholder="无上限"
+          />
           <ConsensusSlider value={minConsensus} onChange={setMinConsensus} />
         </div>
+        <p className="text-xs text-[#6e7681] mt-3">
+          提示: A 股最小买入 100 股 · 想用 4000 元资金买入需要单价 ≤ ¥40 · ETF 单股可买，1 手 100 股
+        </p>
       </div>
 
       {/* Results table */}
@@ -73,6 +98,8 @@ export default function Picks() {
                   <th className="py-2 pr-4">rank</th>
                   <th className="py-2 pr-4">代码</th>
                   <th className="py-2 pr-4">名称</th>
+                  <th className="py-2 pr-4 text-right">单价 ¥</th>
+                  <th className="py-2 pr-4 text-right">100 股 ¥</th>
                   <th className="py-2 pr-4 text-right">score_today</th>
                   <th className="py-2 pr-4 text-right">score_avg</th>
                   <th className="py-2 pr-4 text-right">rank_avg</th>
@@ -99,6 +126,14 @@ export default function Picks() {
                       <Link to={`/charts/${item.symbol}`} className="hover:underline">
                         {item.name}
                       </Link>
+                    </td>
+                    <td className="py-2 pr-4 text-right font-mono text-[#e6edf3]">
+                      {item.last_price != null ? item.last_price.toFixed(2) : '—'}
+                    </td>
+                    <td className="py-2 pr-4 text-right font-mono text-[#8b949e]">
+                      {item.last_price != null
+                        ? '¥' + (item.last_price * 100).toLocaleString('zh-CN', { maximumFractionDigits: 0 })
+                        : '—'}
                     </td>
                     <td
                       className={cn(
@@ -192,6 +227,33 @@ function NumberInput({
         onChange={(e) =>
           onChange(Math.max(min, Math.min(max, Number(e.target.value) || min)))
         }
+        className="mt-1 w-full rounded-md bg-[#161b22] border border-[#30363d] px-3 h-9 text-sm focus:outline-none focus:border-[#1f6feb]"
+      />
+    </label>
+  );
+}
+
+function PriceInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs text-[#6e7681] uppercase tracking-wider">{label}</span>
+      <input
+        type="number"
+        min={0}
+        step={0.01}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
         className="mt-1 w-full rounded-md bg-[#161b22] border border-[#30363d] px-3 h-9 text-sm focus:outline-none focus:border-[#1f6feb]"
       />
     </label>

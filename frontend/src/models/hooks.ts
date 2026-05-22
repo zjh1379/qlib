@@ -7,6 +7,8 @@ export function useScreen(
     days?: number;
     min_top?: number;
     view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
+    min_price?: number | null;
+    max_price?: number | null;
   } = {},
 ) {
   return useQuery({

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from threading import Lock
 
@@ -78,6 +78,41 @@ def get_ohlcv(symbols: list[str], start: str, end: str, freq: str = "day") -> pd
             context={"symbols": symbols, "start": start, "end": end},
         )
     return df
+
+
+def get_latest_close_prices(symbols: list[str], lookback_days: int = 10) -> dict[str, float]:
+    """Return {symbol: most-recent-non-null close price} for each requested symbol.
+
+    `lookback_days` controls how far back we search per symbol — a value of 10 covers
+    typical suspensions/holiday gaps without pulling unnecessary history. Symbols with
+    no data in the window are omitted from the returned dict.
+    """
+    init_qlib_once()
+    if not symbols:
+        return {}
+    end_date = get_calendar_end()
+    start_date = end_date - timedelta(days=lookback_days)
+    try:
+        df = D.features(
+            instruments=symbols,
+            fields=["$close"],
+            start_time=start_date.isoformat(),
+            end_time=end_date.isoformat(),
+        )
+    except Exception as exc:
+        _log.warning("latest_close_fetch_failed error=%s", str(exc))
+        return {}
+    if df is None or df.empty:
+        return {}
+    # qlib returns MultiIndex (instrument, datetime). For each instrument, take the
+    # last non-null close. groupby().last() ignores NaN if dropna() is called first.
+    df = df.dropna()
+    if df.empty:
+        return {}
+    out: dict[str, float] = {}
+    for inst, group in df.groupby(level="instrument"):
+        out[inst] = float(group["$close"].iloc[-1])
+    return out
 
 
 def get_calendar_end() -> date:

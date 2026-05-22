@@ -20,9 +20,12 @@ def screen(
     min_top: int = Query(default=0, ge=0),
     experiment: str | None = Query(default=None),
     view: str = Query(default="ensemble", pattern="^(ensemble|lightgbm|alstm|tra)$"),
+    min_price: float | None = Query(default=None, ge=0, description="Inclusive lower bound on most-recent close (CNY/share)"),
+    max_price: float | None = Query(default=None, ge=0, description="Inclusive upper bound on most-recent close (CNY/share)"),
 ):
     return service.screen(
-        top=top, days=days, min_top=min_top, experiment=experiment, view=view
+        top=top, days=days, min_top=min_top, experiment=experiment, view=view,
+        min_price=min_price, max_price=max_price,
     )
 
 

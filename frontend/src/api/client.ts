@@ -121,6 +121,8 @@ export const api = {
         min_top?: number;
         experiment?: string;
         view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
+        min_price?: number | null;
+        max_price?: number | null;
       } = {},
     ) => {
       type R = paths['/api/models/screen']['get']['responses']['200']['content']['application/json'];
@@ -130,6 +132,10 @@ export const api = {
       if (params.min_top !== undefined) q.set('min_top', String(params.min_top));
       if (params.experiment) q.set('experiment', params.experiment);
       if (params.view) q.set('view', params.view);
+      if (params.min_price !== undefined && params.min_price !== null)
+        q.set('min_price', String(params.min_price));
+      if (params.max_price !== undefined && params.max_price !== null)
+        q.set('max_price', String(params.max_price));
       const qs = q.toString();
       return request<R>(`/api/models/screen${qs ? '?' + qs : ''}`);
     },

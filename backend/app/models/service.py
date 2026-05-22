@@ -4,6 +4,7 @@ from app.core.config import Settings
 from app.core.exceptions import NotFoundError
 from app.core.qlib_adapter import (
     get_csi300_with_names,
+    get_latest_close_prices,
     get_latest_recorder_id,
     init_qlib_once,
     load_pred,
@@ -99,6 +100,8 @@ def screen(
     min_top: int = 0,
     experiment: str | None = None,
     view: str = "ensemble",
+    min_price: float | None = None,
+    max_price: float | None = None,
 ) -> dict:
     """
     Rank the model's universe by 'score_avg over last `days` days', then filter by
@@ -109,6 +112,14 @@ def screen(
     (lightgbm -> lgbm_, alstm -> alstm_, tra -> tra_). Falls back to the
     ensemble score if no matching base columns are present in the prediction
     frame (e.g. old-shape pred.pkl).
+
+    Price filter (CNY per share, applied to most recent close):
+      - `min_price` / `max_price` are inclusive bounds; either may be None to
+        skip that side of the range.
+      - Symbols with no available price data are dropped when *any* price
+        filter is active; included with `last_price=None` otherwise.
+      - To accommodate filtering, we over-fetch candidates (top * 4, capped at
+        300) before filtering, then trim back to `top` for the response.
     """
     init_qlib_once()
     s = Settings()
@@ -159,7 +170,33 @@ def screen(
 
     name_map = _name_map()
 
-    items = _build_screen_items(df, top=top, days=days, min_top=min_top, name_map=name_map)
+    # Over-fetch when a price filter is active so we still have enough rows
+    # to return `top` items after filtering. Cap at 300 to bound qlib I/O.
+    price_filter_active = (min_price is not None) or (max_price is not None)
+    fetch_top = min(top * 4, 300) if price_filter_active else top
+
+    items = _build_screen_items(df, top=fetch_top, days=days, min_top=min_top, name_map=name_map)
+
+    if items:
+        prices = get_latest_close_prices([it.symbol for it in items])
+        for it in items:
+            it.last_price = prices.get(it.symbol)
+
+    if price_filter_active:
+        def _in_range(price: float | None) -> bool:
+            if price is None:
+                return False
+            if min_price is not None and price < min_price:
+                return False
+            if max_price is not None and price > max_price:
+                return False
+            return True
+
+        items = [it for it in items if _in_range(it.last_price)]
+        # Re-rank 1..N after filtering so the displayed rank matches the table position.
+        for new_rank, it in enumerate(items[:top], start=1):
+            it.rank = new_rank
+        items = items[:top]
 
     return {
         "experiment": exp,
