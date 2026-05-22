@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import ChartPage from '@/charts/ChartPage';
 import Dashboard from '@/pages/Dashboard';
+import Evaluation from '@/pages/Evaluation';
 import Picks from '@/pages/Picks';
 import Portfolio from '@/pages/Portfolio';
 import PortfolioTransactions from '@/pages/PortfolioTransactions';
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/picks" element={<Picks />} />
         <Route path="/portfolio" element={<Portfolio />} />
         <Route path="/portfolio/transactions" element={<PortfolioTransactions />} />
+        <Route path="/evaluation" element={<Evaluation />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>

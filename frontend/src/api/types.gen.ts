@@ -301,6 +301,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/evaluation/recorders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Recorders
+         * @description Enumerate all qlib recorders across all experiments with lightweight
+         *     summary info (pred date range + cached eval status). Cheap; no pred.pkl load.
+         */
+        get: operations["list_recorders_api_evaluation_recorders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/evaluation/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Evaluation
+         * @description Trigger evaluation for a recorder. Cached; pass force_refresh=true to recompute.
+         */
+        post: operations["run_evaluation_api_evaluation_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/evaluation/results/{recorder_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Result
+         * @description Return the cached eval result for a recorder. 404 if never evaluated.
+         */
+        get: operations["get_result_api_evaluation_results__recorder_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/evaluation/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare
+         * @description Side-by-side compare of 2 recorders + paired t-test. Triggers eval on
+         *     either or both if not yet cached.
+         */
+        get: operations["compare_api_evaluation_compare_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduling/retrain": {
         parameters: {
             query?: never;
@@ -357,6 +439,18 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AcceptanceResult
+         * @description Per-criterion pass/fail against spec §11 thresholds.
+         */
+        AcceptanceResult: {
+            /** Passed */
+            passed: boolean;
+            /** Details */
+            details: {
+                [key: string]: boolean;
+            };
+        };
         /** AddSymbolRequest */
         AddSymbolRequest: {
             /**
@@ -429,6 +523,26 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * CompareResult
+         * @description Side-by-side comparison of two recorders + paired t-test on daily IC.
+         */
+        CompareResult: {
+            a: components["schemas"]["EvalResult"];
+            b: components["schemas"]["EvalResult"];
+            /** Paired T Stat */
+            paired_t_stat: number;
+            /** Paired P Value */
+            paired_p_value: number;
+            /** Significant At 05 */
+            significant_at_05: boolean;
+            /** Ic Delta */
+            ic_delta: number;
+            /** Ir Delta */
+            ir_delta: number;
+            /** Verdict */
+            verdict: string;
+        };
         /** DataStatus */
         DataStatus: {
             /**
@@ -456,6 +570,54 @@ export interface components {
              * @description One of "fresh" | "stale_1d" | "stale_2d_plus"
              */
             freshness: string;
+        };
+        /**
+         * EvalResult
+         * @description Full evaluation result for one recorder.
+         */
+        EvalResult: {
+            /** Recorder Id */
+            recorder_id: string;
+            /** Experiment */
+            experiment: string;
+            /** Run Name */
+            run_name: string;
+            /** Computed At */
+            computed_at: string;
+            /** Window Start */
+            window_start: string;
+            /** Window End */
+            window_end: string;
+            /** Sample Size */
+            sample_size: number;
+            /** Top K */
+            top_k: number;
+            /** Cost Bps */
+            cost_bps: number;
+            scorecard: components["schemas"]["ScorecardData"];
+            /** Regimes */
+            regimes: components["schemas"]["RegimeMetrics"][];
+            acceptance: components["schemas"]["AcceptanceResult"];
+        };
+        /** EvalRunRequest */
+        EvalRunRequest: {
+            /** Recorder Id */
+            recorder_id: string;
+            /**
+             * Top K
+             * @default 30
+             */
+            top_k: number;
+            /**
+             * Cost Bps
+             * @default 10
+             */
+            cost_bps: number;
+            /**
+             * Force Refresh
+             * @default false
+             */
+            force_refresh: boolean;
         };
         /** ExperimentInfo */
         ExperimentInfo: {
@@ -652,6 +814,37 @@ export interface components {
              */
             message: string;
         };
+        /**
+         * RecorderSummary
+         * @description Lightweight summary for the list view. Computed without full eval.
+         */
+        RecorderSummary: {
+            /** Recorder Id */
+            recorder_id: string;
+            /** Experiment */
+            experiment: string;
+            /** Run Name */
+            run_name: string;
+            /** Created At */
+            created_at: string;
+            /** Pred Start */
+            pred_start?: string | null;
+            /** Pred End */
+            pred_end?: string | null;
+            /** Pred Rows */
+            pred_rows?: number | null;
+            /**
+             * Has Eval
+             * @default false
+             */
+            has_eval: boolean;
+            /** Ic Mean */
+            ic_mean?: number | null;
+            /** Ir */
+            ir?: number | null;
+            /** Acceptance Passed */
+            acceptance_passed?: boolean | null;
+        };
         /** RecorderVersion */
         RecorderVersion: {
             /** Recorder Id */
@@ -691,6 +884,21 @@ export interface components {
             started_at: string;
             /** Message */
             message: string;
+        };
+        /**
+         * RegimeMetrics
+         * @description One regime segment's scorecard + label (e.g. '2020-COVID').
+         */
+        RegimeMetrics: {
+            /** Label */
+            label: string;
+            /** Start */
+            start: string;
+            /** End */
+            end: string;
+            /** Sample Size */
+            sample_size: number;
+            scorecard: components["schemas"]["ScorecardData"];
         };
         /** RetrainScheduleRead */
         RetrainScheduleRead: {
@@ -749,6 +957,31 @@ export interface components {
             reason?: string | null;
             /** Job Id */
             job_id?: string | null;
+        };
+        /**
+         * ScorecardData
+         * @description The 8-metric scorecard (per spec §8).
+         *
+         *     All metrics computed against open-to-open returns + TopK=30 long-only
+         *     portfolio with `bps` transaction cost adjustment.
+         */
+        ScorecardData: {
+            /** Ic Mean */
+            ic_mean: number;
+            /** Ric Mean */
+            ric_mean: number;
+            /** Icir */
+            icir: number;
+            /** Top Bottom Spread Monthly */
+            top_bottom_spread_monthly: number;
+            /** Annual Excess Return */
+            annual_excess_return: number;
+            /** Ir */
+            ir: number;
+            /** Max Drawdown */
+            max_drawdown: number;
+            /** Daily Turnover */
+            daily_turnover: number;
         };
         /** ScreenItem */
         ScreenItem: {
@@ -1515,6 +1748,126 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CandidatesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recorders_api_evaluation_recorders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecorderSummary"][];
+                };
+            };
+        };
+    };
+    run_evaluation_api_evaluation_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_result_api_evaluation_results__recorder_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recorder_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compare_api_evaluation_compare_get: {
+        parameters: {
+            query: {
+                /** @description recorder_id of baseline (A) */
+                a: string;
+                /** @description recorder_id of challenger (B) */
+                b: string;
+                top_k?: number;
+                cost_bps?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompareResult"];
                 };
             };
             /** @description Validation Error */

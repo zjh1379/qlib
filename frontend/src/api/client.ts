@@ -212,6 +212,29 @@ export const api = {
       });
     },
   },
+  evaluation: {
+    listRecorders: () => {
+      type R = paths['/api/evaluation/recorders']['get']['responses']['200']['content']['application/json'];
+      return request<R>('/api/evaluation/recorders');
+    },
+    run: (
+      body: paths['/api/evaluation/run']['post']['requestBody']['content']['application/json'],
+    ) => {
+      type R = paths['/api/evaluation/run']['post']['responses']['200']['content']['application/json'];
+      return request<R>('/api/evaluation/run', { method: 'POST', body: JSON.stringify(body) });
+    },
+    getResult: (recorderId: string) => {
+      type R = paths['/api/evaluation/results/{recorder_id}']['get']['responses']['200']['content']['application/json'];
+      return request<R>(`/api/evaluation/results/${encodeURIComponent(recorderId)}`);
+    },
+    compare: (a: string, b: string, opts: { top_k?: number; cost_bps?: number } = {}) => {
+      type R = paths['/api/evaluation/compare']['get']['responses']['200']['content']['application/json'];
+      const q = new URLSearchParams({ a, b });
+      if (opts.top_k !== undefined) q.set('top_k', String(opts.top_k));
+      if (opts.cost_bps !== undefined) q.set('cost_bps', String(opts.cost_bps));
+      return request<R>(`/api/evaluation/compare?${q.toString()}`);
+    },
+  },
   scheduling: {
     getRetrain: () => {
       type R = paths['/api/scheduling/retrain']['get']['responses']['200']['content']['application/json'];
