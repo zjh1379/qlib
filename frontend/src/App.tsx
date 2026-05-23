@@ -3,6 +3,7 @@ import Layout from '@/components/Layout';
 import ChartPage from '@/charts/ChartPage';
 import Dashboard from '@/pages/Dashboard';
 import Evaluation from '@/pages/Evaluation';
+import EvaluationCompare from '@/pages/EvaluationCompare';
 import EvaluationDetail from '@/pages/EvaluationDetail';
 import Picks from '@/pages/Picks';
 import Portfolio from '@/pages/Portfolio';
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/portfolio" element={<Portfolio />} />
         <Route path="/portfolio/transactions" element={<PortfolioTransactions />} />
         <Route path="/evaluation" element={<Evaluation />} />
+        <Route path="/evaluation/compare" element={<EvaluationCompare />} />
         <Route path="/evaluation/:recorderId" element={<EvaluationDetail />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
