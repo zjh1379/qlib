@@ -362,12 +362,54 @@ def run_once(cfg: RollingConfig, end_date: date) -> Path:
     return pred_path
 
 
+def run_backfill(cfg: RollingConfig, start: date, end: date) -> list[Path]:
+    """Loop run_once over every Friday in [start, end]. Writes one
+    pred_<friday>.pkl per iteration. Returns list of written paths.
+
+    Each iteration is independent — if one fails, we log and continue.
+    """
+    from datetime import timedelta
+    # Find the first Friday on or after start
+    days_to_friday = (4 - start.weekday()) % 7
+    cursor = start + timedelta(days=days_to_friday)
+    paths: list[Path] = []
+    failures: list[tuple[date, str]] = []
+    week_count = (end - cursor).days // 7 + 1
+    _log.info("backfill_start cursor=%s end=%s estimated_weeks=%d", cursor, end, week_count)
+    iteration = 0
+    while cursor <= end:
+        iteration += 1
+        _log.info("backfill_week iteration=%d/%d end_date=%s", iteration, week_count, cursor)
+        try:
+            path = run_once(cfg, cursor)
+            paths.append(path)
+            _log.info("backfill_week_ok iteration=%d end_date=%s rows_written=ok", iteration, cursor)
+        except Exception as exc:
+            _log.warning("backfill_week_failed iteration=%d end_date=%s error=%s",
+                         iteration, cursor, str(exc))
+            failures.append((cursor, str(exc)))
+        cursor += timedelta(days=7)
+    _log.info("backfill_done weeks_ok=%d weeks_failed=%d", len(paths), len(failures))
+    if failures:
+        for d, e in failures:
+            _log.warning("backfill_failure_summary date=%s error=%s", d, e[:200])
+    return paths
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
+
     p_run = sub.add_parser("run-once")
     p_run.add_argument("--end-date", default=None)
     p_run.add_argument("--config", default="production/configs/rolling_ensemble.yaml")
+
+    p_back = sub.add_parser("backfill",
+        help="Loop run-once over every Friday in [start, end]. ~5-30 min per week.")
+    p_back.add_argument("--start", required=True, help="YYYY-MM-DD inclusive")
+    p_back.add_argument("--end", required=True, help="YYYY-MM-DD inclusive")
+    p_back.add_argument("--config", default="production/configs/rolling_ensemble.yaml")
+
     args = parser.parse_args()
 
     if args.cmd == "run-once":
@@ -375,6 +417,12 @@ def main() -> None:
         cfg = load_config(REPO_ROOT / args.config)
         path = run_once(cfg, end)
         print(f"OK: wrote {path}")
+    elif args.cmd == "backfill":
+        cfg = load_config(REPO_ROOT / args.config)
+        paths = run_backfill(cfg, date.fromisoformat(args.start), date.fromisoformat(args.end))
+        print(f"OK: backfilled {len(paths)} weeks")
+        for p in paths:
+            print(f"  {p}")
     else:
         raise NotImplementedError(args.cmd)
 
