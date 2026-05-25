@@ -96,7 +96,7 @@ def train_alstm_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Se
     train loop to apply explicit gradient clipping.
     """
     from qlib.contrib.model.pytorch_alstm_ts import ALSTM
-    from qlib.data.dataset import DatasetH
+    from qlib.data.dataset import TSDatasetH
     from qlib.workflow import R
 
     model_cfg_path = REPO_ROOT / [m for m in cfg.model_specs if m["id"] == "alstm"][0]["config"]
@@ -107,7 +107,13 @@ def train_alstm_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Se
     outputs: list[pd.Series] = []
     for h in cfg.horizons:
         handler = mhd.handler_objs[h.name]
-        dataset = DatasetH(
+        # ALSTM (pytorch_alstm_ts) requires the TSDataSampler returned by
+        # TSDatasetH.prepare(); it calls .config(fillna_type=...) on the
+        # sampler, which only exists on TSDataSampler — not the plain
+        # DataFrame returned by DatasetH.prepare(). step_len=20 matches the
+        # `step_len: 20` field in production/configs/alstm_alpha360.yaml.
+        dataset = TSDatasetH(
+            step_len=20,
             handler=handler,
             segments={
                 "train": mhd.train_segment,

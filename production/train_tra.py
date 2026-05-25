@@ -34,22 +34,35 @@ def train_tra_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Seri
     The remaining horizons still produce series, and the upstream ensemble
     degrades gracefully via rank-average over fewer columns.
     """
+    from qlib.contrib.data.dataset import MTSDatasetH
     from qlib.contrib.model.pytorch_tra import TRAModel
-    from qlib.data.dataset import DatasetH
     from qlib.workflow import R
 
     tra_yaml = _load_tra_config()
     mhd = _build_multihead_dataset(cfg, universe_name, end_date)
+    # num_states must match tra_config.num_states from the YAML so the
+    # OT routing receives the same K it was configured for.
+    num_states = int(tra_yaml["model"]["kwargs"]["tra_config"]["num_states"])
     outputs: list[pd.Series] = []
     for h in cfg.horizons:
         handler = mhd.handler_objs[h.name]
-        dataset = DatasetH(
+        # TRAModel hard-rejects anything that isn't an MTSDatasetH; it relies
+        # on the sampler's batch shape (N×T×D) and per-sample state vectors.
+        # seq_len=20 matches `step_len: 20` in the alstm/tra YAMLs;
+        # horizon comes from the current iteration's horizon_days entry.
+        dataset = MTSDatasetH(
             handler=handler,
             segments={
                 "train": mhd.train_segment,
                 "valid": mhd.valid_segment,
                 "test": mhd.test_segment,
             },
+            seq_len=20,
+            horizon=cfg.horizon_days[h.name],
+            num_states=num_states,
+            batch_size=1024,
+            n_samples=None,
+            drop_last=False,
         )
         model = TRAModel(**tra_yaml["model"]["kwargs"])
         with R.start(experiment_name=cfg.experiment_name, recorder_name=f"tra_{h.name}_{end_date}"):

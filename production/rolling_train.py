@@ -262,8 +262,13 @@ def run_once(cfg: RollingConfig, end_date: date) -> Path:
         h5 = next(h for h in cfg.horizons if h.name == "5d")
         s_5 = split(end_date=end_date, cfg=h5)
         label_expr = "Ref($open, -6) / Ref($open, -1) - 1"
+        # NOTE: pass `members` (list of symbol strings) — not `universe_name`
+        # (a qlib instruments-file name). The handler-based code path (LGBM
+        # train) accepts the string because the handler wraps it via
+        # D.instruments(market=...), but raw D.features needs a list or a
+        # dict from D.instruments(). The list is the simpler choice.
         labels = D.features(
-            instruments=universe_name,
+            instruments=members,
             fields=[label_expr],
             start_time=str(s_5.valid_start),
             end_time=str(s_5.valid_end),
@@ -300,8 +305,9 @@ def run_once(cfg: RollingConfig, end_date: date) -> Path:
         from qlib.data import D
         h5 = next(h for h in cfg.horizons if h.name == "5d")
         s_5 = split(end_date=end_date, cfg=h5)
+        # Same `members` vs `universe_name` rationale as the stacker block above.
         labels = D.features(
-            instruments=universe_name,
+            instruments=members,
             fields=["Ref($open, -6) / Ref($open, -1) - 1"],
             start_time=str(s_5.test_start),
             end_time=str(s_5.test_end),
