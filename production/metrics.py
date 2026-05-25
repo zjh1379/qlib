@@ -48,6 +48,21 @@ def compute_scorecard(
     top_k: int = 30,
     bps: float = 10,
 ) -> dict[str, float]:
+    # Defensive guard: if pred or label is empty, return all-NaN scorecard
+    # (rather than risking ambiguous Series-truthy errors from the downstream
+    # groupby/aggregate chain).
+    if pred is None or label is None or pred.empty or label.empty:
+        return {
+            "ic_mean": float("nan"),
+            "ric_mean": float("nan"),
+            "icir": float("nan"),
+            "top_bottom_spread_monthly": float("nan"),
+            "annual_excess_return": float("nan"),
+            "ir": float("nan"),
+            "max_drawdown": float("nan"),
+            "daily_turnover": float("nan"),
+        }
+
     ic = _daily_ic(pred, label, "pearson")
     ric = _daily_ic(pred, label, "spearman")
     icir = ic.mean() / ic.std() if ic.std() > 0 else float("nan")
@@ -61,25 +76,34 @@ def compute_scorecard(
         top = g.nlargest(top_k, "p")["y"].mean()
         bot = g.nsmallest(top_k, "p")["y"].mean()
         spreads.append(top - bot)
-    top_bottom_monthly = float(np.mean(spreads) * 100) if spreads else float("nan")
+    # `spreads` is a Python list of scalars; use `len(...)` to avoid any chance
+    # of Series-truthy ambiguity if a future refactor changes the container.
+    top_bottom_monthly = float(np.mean(spreads) * 100) if len(spreads) > 0 else float("nan")
 
     r, turn = _portfolio_returns(pred, label, top_k)
     r_cost_adj = r - turn * (bps / 10_000)
-    annual = r_cost_adj.mean() * 252
-    ir = (r_cost_adj.mean() / r_cost_adj.std()) * np.sqrt(252) if r_cost_adj.std() > 0 else float("nan")
+    annual = r_cost_adj.mean() * 252 if not r_cost_adj.empty else float("nan")
+    ir = (
+        (r_cost_adj.mean() / r_cost_adj.std()) * np.sqrt(252)
+        if not r_cost_adj.empty and r_cost_adj.std() > 0
+        else float("nan")
+    )
 
-    cumulative = (1 + r_cost_adj).cumprod()
-    drawdown = (cumulative / cumulative.cummax() - 1.0).min()
+    if not r_cost_adj.empty:
+        cumulative = (1 + r_cost_adj).cumprod()
+        drawdown = (cumulative / cumulative.cummax() - 1.0).min()
+    else:
+        drawdown = float("nan")
 
     return {
-        "ic_mean": float(ic.mean()),
-        "ric_mean": float(ric.mean()),
+        "ic_mean": float(ic.mean()) if not ic.empty else float("nan"),
+        "ric_mean": float(ric.mean()) if not ric.empty else float("nan"),
         "icir": float(icir),
         "top_bottom_spread_monthly": top_bottom_monthly,
         "annual_excess_return": float(annual),
         "ir": float(ir),
         "max_drawdown": float(drawdown),
-        "daily_turnover": float(turn.mean()),
+        "daily_turnover": float(turn.mean()) if not turn.empty else float("nan"),
     }
 
 
