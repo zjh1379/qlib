@@ -15,9 +15,42 @@ from app.models.schemas import ScreenItem
 
 
 def _name_map() -> dict[str, str]:
-    """Build symbol -> name map from qlib_adapter.get_csi300_with_names()."""
-    pairs = get_csi300_with_names()
-    return {p["symbol"]: p["name"] for p in pairs}
+    """Build symbol -> name map from cn_names_cache.json directly.
+
+    Covers all A-share stocks (~5500), not just CSI300, so the Picks page can
+    show names for CSI500 + new listings that aren't yet in any market file.
+    """
+    import json
+    from pathlib import Path
+    cache_path = Path(__file__).resolve().parents[3] / "production" / "cn_names_cache.json"
+    if not cache_path.exists():
+        # Fall back to the old CSI300-only path if cache file is missing
+        pairs = get_csi300_with_names()
+        return {p["symbol"]: p["name"] for p in pairs}
+    try:
+        blob = json.loads(cache_path.read_text(encoding="utf-8"))
+        bare_map = blob.get("map", {})
+    except Exception:
+        pairs = get_csi300_with_names()
+        return {p["symbol"]: p["name"] for p in pairs}
+
+    # Expand bare-code keys to fully-prefixed SH/SZ symbols by inferring exchange
+    out: dict[str, str] = {}
+    for bare, name in bare_map.items():
+        if not isinstance(bare, str) or not isinstance(name, str) or not name:
+            continue
+        # Stocks: 6/9 prefix → SH (Shanghai), 0/2/3 → SZ (Shenzhen)
+        # ETFs follow the same exchange convention.
+        if bare[:1] in ("6", "9", "5"):
+            sym = "SH" + bare
+        elif bare[:1] in ("0", "1", "2", "3"):
+            sym = "SZ" + bare
+        elif bare[:1] in ("4", "8"):
+            sym = "BJ" + bare
+        else:
+            continue
+        out[sym] = name
+    return out
 
 
 def _build_screen_items(

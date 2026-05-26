@@ -1,10 +1,17 @@
 # ALSTM-Alpha360 hyperparameters (locked per spec §5).
 # β simplification: trains qlib's stock single-output ALSTM 3× per weekly run
 # (once per horizon). True label-multi-head sharing is a γ optimization.
+#
+# IMPORTANT: uses qlib's non-`_ts` ALSTM variant + plain DatasetH (the
+# canonical Alpha360 config — see examples/benchmarks/ALSTM/
+# workflow_config_alstm_Alpha360.yaml). The non-`_ts` model internally
+# reshapes Alpha360's 360 flat cols into (batch, d_feat=6, lookback=60).
+# Using `pytorch_alstm_ts` + TSDatasetH would produce shape
+# (batch, step_len, 360) and crash on the 6×64 fc_in layer.
 
 model:
   class: ALSTM
-  module_path: qlib.contrib.model.pytorch_alstm_ts
+  module_path: qlib.contrib.model.pytorch_alstm
   kwargs:
     d_feat: 6
     hidden_size: 64
@@ -37,6 +44,7 @@ infer_processors:
     kwargs:
       fields_group: feature
 
-step_len: 20
-
+# grad_clip_max_norm=3.0 is enforced inside qlib's pytorch_alstm.ALSTM via
+# `torch.nn.utils.clip_grad_value_(self.ALSTM_model.parameters(), 3.0)`.
+# Kept here for documentation; not consumed by training code (γ TODO).
 grad_clip_max_norm: 3.0

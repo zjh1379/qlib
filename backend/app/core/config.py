@@ -21,7 +21,11 @@ class Settings(BaseSettings):
     app_db_path: str = "app.db"
 
     # Defaults
-    default_experiment: str = "daily_cn_fresh"
+    # β phase switchover 2026-05-26: LGBM × 3-horizon rank-avg ensemble
+    # beats daily_cn_fresh on IC (0.0349 vs 0.0263), MDD (-9.3% vs -20.4%),
+    # turnover (32% vs 49%) over the same 53 trading day evaluation window.
+    # See production/reports/backfill_eval_20260526_090328.json for details.
+    default_experiment: str = "rolling_v2_ensemble"
     default_chart_window_days: int = 365
 
     # Retrain / rolling-ensemble subprocess settings
