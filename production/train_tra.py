@@ -141,12 +141,25 @@ def _install_safe_tra_test_epoch() -> None:
                 if not pd.isna(value):
                     self._writer.add_scalar(prefix + "/" + key, value, epoch)
 
+        # NOTE: qlib's original test_epoch ALWAYS returns a 4-tuple, even
+        # when return_pred=False (preds/probs/P_all are empty lists in that
+        # case). `_fit` then does `test_epoch(...)[0]` to pull metrics out
+        # of the tuple. If we return just `metrics` here, `[0]` on the dict
+        # raises KeyError(0). Match the canonical contract.
         if return_pred:
             preds = pd.concat(preds, axis=0) if preds else pd.DataFrame(columns=["score", "label"])
-            probs = pd.concat(probs, axis=0) if probs else None
-            P_all = pd.concat(P_all, axis=0) if P_all else None
-            return metrics, preds, probs, P_all
-        return metrics
+            if preds.shape[0] > 0 and hasattr(data_set, "restore_index"):
+                try:
+                    preds.index = data_set.restore_index(preds.index)
+                    preds.index = preds.index.swaplevel()
+                    preds.sort_index(inplace=True)
+                except Exception:
+                    pass  # leave as-is on restore failure
+            if probs:
+                probs = pd.concat(probs, axis=0)
+            if P_all:
+                P_all = pd.concat(P_all, axis=0)
+        return metrics, preds, probs, P_all
 
     TRAModel.test_epoch = safe_test_epoch
     TRAModel._safe_test_epoch_installed = True
@@ -242,7 +255,11 @@ def train_tra_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Seri
                     pred_series = pred
                 outputs.append(pred_series.rename(f"tra_{h.name}"))
             except Exception as exc:
-                _log.warning("tra_failed_skipping horizon=%s error=%s", h.name, str(exc))
+                import traceback
+                _log.warning(
+                    "tra_failed_skipping horizon=%s error=%s\n%s",
+                    h.name, repr(exc), traceback.format_exc(),
+                )
         del handler, dataset, model
         gc.collect()
 
