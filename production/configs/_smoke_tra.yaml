@@ -1,0 +1,56 @@
+# TRA smoke config — same as tra_alpha360.yaml but with reduced epochs
+# for fast end-to-end validation.
+
+model:
+  class: TRAModel
+  module_path: qlib.contrib.model.pytorch_tra
+  kwargs:
+    model_type: RNN
+    lr: 0.001
+    n_epochs: 10            # smoke (was 100)
+    early_stop: 5           # smoke (was 20)
+    seed: 0
+    lamb: 1.0
+    rho: 0.99
+    alpha: 0.5
+    transport_method: router
+    memory_mode: sample
+    pretrain: true
+    eval_train: false
+    eval_test: true
+
+    model_config:
+      input_size: 6
+      hidden_size: 64
+      num_layers: 2
+      rnn_arch: LSTM
+      use_attn: true
+      dropout: 0.0
+
+    tra_config:
+      num_states: 3
+      rnn_arch: LSTM
+      hidden_size: 32
+      num_layers: 1
+      dropout: 0.0
+      tau: 1.0
+      src_info: LR_TPE
+
+handler:
+  class: Alpha360_OpenH
+  module_path: custom_handler
+
+learn_processors:
+  - class: DropnaLabel
+
+infer_processors:
+  - class: RobustZScoreNorm
+    kwargs:
+      fields_group: feature
+      clip_outlier: true
+  - class: Fillna
+    kwargs:
+      fields_group: feature
+
+step_len: 60
+grad_clip_max_norm: 3.0

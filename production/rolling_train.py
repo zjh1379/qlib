@@ -77,7 +77,9 @@ class RollingConfig:
 
 
 def load_config(path: Path) -> RollingConfig:
-    with path.open() as f:
+    # Explicit UTF-8 — Windows locale (GBK) chokes on non-ASCII comments
+    # (e.g. arrow/multiplication-sign in smoke configs).
+    with path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     horizons = []
     horizon_days = {}

@@ -1,0 +1,45 @@
+# Smoke-test config for verifying ALSTM + TRA training end-to-end.
+#
+# Differences vs rolling_ensemble.yaml:
+#   - Only the 5d horizon (skip 1d + 20d → 3× fewer model trainings)
+#   - train_years=1 (instead of 3/5/7 → ~5× less data per epoch)
+#   - All 3 models enabled (so stacker is exercised with 3 base preds)
+#
+# Use this to validate the model wiring before kicking off a full rolling_train.
+# Expected runtime: 30-60 min on CPU; 10-20 min on GPU.
+#
+# CLI:
+#   python -m production.rolling_train run-once --end-date 2026-04-17 \
+#       --config production/configs/rolling_ensemble_smoke.yaml
+
+experiment_name: rolling_v2_smoke
+
+universe: csi800
+provider_uri: ~/.qlib/qlib_data/cn_data_bs
+region: cn
+
+horizons:
+  - name: "5d"
+    horizon_days: 5
+    train_years: 1
+    valid_years: 1
+    stack_years: 1
+    test_weeks: 1
+
+models:
+  - id: lgbm
+    config: production/configs/lgbm_alpha158_multi.yaml
+    enabled: true
+  - id: alstm
+    config: production/configs/_smoke_alstm.yaml
+    enabled: true
+  - id: tra
+    config: production/configs/_smoke_tra.yaml
+    enabled: true
+
+post_process:
+  ewma_alpha: 0.5
+  cost_bps: 10
+
+mlruns_archive:
+  keep_weeks: 4

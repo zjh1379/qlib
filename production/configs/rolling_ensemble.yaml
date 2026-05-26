@@ -32,10 +32,10 @@ models:
     enabled: true
   - id: alstm
     config: production/configs/alstm_alpha360.yaml
-    enabled: false  # TODO γ phase: fix Alpha360 d_feat reshape (6 vs 360 cols mismatch)
+    enabled: true
   - id: tra
     config: production/configs/tra_alpha360.yaml
-    enabled: false  # TODO γ phase: fix Alpha360 d_feat reshape (6 vs 360 cols mismatch)
+    enabled: true   # γ-phase: TRA wired after smoke fix (2026-05-26)
 
 post_process:
   ewma_alpha: 0.5

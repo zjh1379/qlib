@@ -1,34 +1,47 @@
-# TRA-Alpha360 hyperparameters (locked per spec §5).
-# β simplification: trains qlib's stock TRA 3× per weekly run (once per horizon).
-# True label-multi-head sharing is a γ optimization.
+# TRA-Alpha360 hyperparameters.
+#
+# Aligned with qlib's canonical config:
+#   examples/benchmarks/TRA/workflow_config_tra_Alpha360.yaml
+#
+# β simplification: trains qlib's TRAModel once per horizon (3× per weekly
+# run) — same multi-head pattern as ALSTM. True label-multi-head sharing is
+# a γ optimization.
 
 model:
   class: TRAModel
   module_path: qlib.contrib.model.pytorch_tra
   kwargs:
-    # NOTE: TRAModel doesn't accept `batch_size` or `GPU` — `batch_size`
-    # belongs to MTSDatasetH's dataset config (not used by this β
-    # pipeline), and TRA uses torch's default device selection.
-    # The intended batch_size=1024 from the original spec is documented
-    # here as a γ TODO if/when we adopt MTSDatasetH.
+    # OT-routing core
     model_type: RNN
-    n_epochs: 100
     lr: 0.001
+    n_epochs: 100
     early_stop: 20
     seed: 0
     lamb: 1.0
     rho: 0.99
-    alpha: 1.0
-    transport_method: oracle
+    alpha: 0.5                 # canonical (was 1.0; reduces OT regularisation weight)
+    transport_method: router   # router (deployed) — NOT oracle (oracle needs labels at inference; ablation only)
+    memory_mode: sample        # must match MTSDatasetH.memory_mode (canonical)
+    pretrain: true             # required: backbone pretrain before joint TRA training; without it OT routing degenerates
+    eval_train: false
+    eval_test: true
+
+    # RNN backbone config (60-day lookback × 6 OHLCV-derived features)
     model_config:
       input_size: 6
       hidden_size: 64
       num_layers: 2
+      rnn_arch: LSTM
       use_attn: true
       dropout: 0.0
+
+    # TRA router head
     tra_config:
-      num_states: 10
-      hidden_size: 16
+      num_states: 3            # canonical (was 10; lower K = lower OT variance, better convergence on csi800)
+      rnn_arch: LSTM
+      hidden_size: 32          # canonical (was 16)
+      num_layers: 1            # canonical (was missing)
+      dropout: 0.0             # canonical (was missing)
       tau: 1.0
       src_info: LR_TPE
 
@@ -48,5 +61,8 @@ infer_processors:
     kwargs:
       fields_group: feature
 
-step_len: 20
+# Matches qlib's canonical seq_len=60, input_size=6. MTSDatasetH reshapes
+# Alpha360's flat 360 cols into (60 days × 6 features) per sample when
+# input_size is supplied (see qlib.contrib.data.dataset.MTSDatasetH:328-332).
+step_len: 60
 grad_clip_max_norm: 3.0

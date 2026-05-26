@@ -1,0 +1,41 @@
+# ALSTM smoke config — same as alstm_alpha360.yaml but with reduced epochs
+# for fast end-to-end validation. Use via rolling_ensemble_smoke.yaml.
+#
+# Acceptance: just needs to produce an alstm_*.pkl without crashing. Skill at
+# this scale (10 epochs × 1y window) is expected to be weak, but the *plumbing*
+# is what we're validating here.
+
+model:
+  class: ALSTM
+  module_path: qlib.contrib.model.pytorch_alstm
+  kwargs:
+    d_feat: 6
+    hidden_size: 64
+    num_layers: 2
+    dropout: 0.0
+    n_epochs: 10            # smoke (was 100)
+    lr: 0.001
+    early_stop: 5           # smoke (was 20)
+    batch_size: 2048
+    metric: "loss"
+    loss: "mse"
+    GPU: 0
+    seed: 0
+
+handler:
+  class: Alpha360_OpenH
+  module_path: custom_handler
+
+learn_processors:
+  - class: DropnaLabel
+
+infer_processors:
+  - class: RobustZScoreNorm
+    kwargs:
+      fields_group: feature
+      clip_outlier: true
+  - class: Fillna
+    kwargs:
+      fields_group: feature
+
+grad_clip_max_norm: 3.0
