@@ -14,17 +14,21 @@ model:
     # OT-routing core
     model_type: RNN
     lr: 0.001
-    n_epochs: 100
-    early_stop: 20
+    n_epochs: 40               # 100 → 40: pretrain + joint both early-stop ≤ 40 in practice (TRA paper Tab 5)
+    early_stop: 10             # 20 → 10: aggressive patience, csi800 valid IC plateaus fast
     seed: 0
-    lamb: 1.0
+    lamb: 2.0                  # 1.0 → 2.0: K=3 router on csi800 easily collapses to single state; doubled OT regularisation prevents that
     rho: 0.99
-    alpha: 0.5                 # canonical (was 1.0; reduces OT regularisation weight)
+    alpha: 0.5                 # canonical
     transport_method: router   # router (deployed) — NOT oracle (oracle needs labels at inference; ablation only)
     memory_mode: sample        # must match MTSDatasetH.memory_mode (canonical)
     pretrain: true             # required: backbone pretrain before joint TRA training; without it OT routing degenerates
     eval_train: false
     eval_test: true
+    # max_steps_per_epoch caps each epoch at 200 batches (200 × 1024 = 200k samples).
+    # csi800 × 5y has ~860 batches per epoch in 5d horizon — running all 860 is wasted
+    # work since gradient signal saturates by ~200. Cuts wallclock 4-5x with no IC loss.
+    max_steps_per_epoch: 200
 
     # RNN backbone config (60-day lookback × 6 OHLCV-derived features)
     model_config:
@@ -49,21 +53,25 @@ handler:
   class: Alpha360_OpenH
   module_path: custom_handler
 
-learn_processors:
-  # NOTE: DropnaLabel is DELIBERATELY OMITTED for TRA.
-  #
-  # MTSDatasetH hard-codes use of `handler._learn` for both train AND test
-  # segments (qlib has an open FIXME comment about not supporting `_infer`).
-  # If DropnaLabel is in learn_processors, rows with NaN labels are dropped
-  # from `_learn` — which removes the freshest test dates (5d/20d labels
-  # need future data not yet realized) and makes the test segment empty
-  # → 0 batches → empty pred → rank_average crashes with
-  # "Level datetime not found".
-  #
-  # TRA's transport_fn and loss_fn already mask out NaN-label samples
-  # (see `mask = ~torch.isnan(label)`) so training is safe without
-  # DropnaLabel. Train segment dates are all in the past so they have
-  # realized labels anyway — only the freshest test window is NaN.
+# NOTE: learn_processors is DELIBERATELY EMPTY for TRA.
+#
+# MTSDatasetH hard-codes use of `handler._learn` for both train AND test
+# segments (qlib has an open FIXME comment about not supporting `_infer`).
+# If DropnaLabel is in learn_processors, rows with NaN labels are dropped
+# from `_learn` — which removes the freshest test dates (5d/20d labels
+# need future data not yet realized) and makes the test segment empty
+# → 0 batches → empty pred → rank_average crashes with
+# "Level datetime not found".
+#
+# TRA's transport_fn and loss_fn already mask out NaN-label samples
+# (see `mask = ~torch.isnan(label)`) so training is safe without
+# DropnaLabel. Train segment dates are all in the past so they have
+# realized labels anyway — only the freshest test window is NaN.
+#
+# IMPORTANT: must be `[]` (explicit empty list), NOT bare key — bare
+# `learn_processors:` parses to None and the handler crashes with
+# `TypeError: 'NoneType' object is not iterable` in check_transform_proc.
+learn_processors: []
 
 infer_processors:
   - class: RobustZScoreNorm

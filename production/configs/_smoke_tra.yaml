@@ -7,12 +7,13 @@ model:
   kwargs:
     model_type: RNN
     lr: 0.001
-    n_epochs: 10            # smoke (was 100)
-    early_stop: 5           # smoke (was 20)
+    n_epochs: 10            # smoke
+    early_stop: 5
     seed: 0
-    lamb: 1.0
+    lamb: 2.0               # match production (was 1.0)
     rho: 0.99
     alpha: 0.5
+    max_steps_per_epoch: 50 # smoke (production uses 200)
     transport_method: router
     memory_mode: sample
     pretrain: true
@@ -40,8 +41,8 @@ handler:
   class: Alpha360_OpenH
   module_path: custom_handler
 
-learn_processors:
-  - class: DropnaLabel
+# Empty list (not bare key) — see tra_alpha360.yaml comment for why.
+learn_processors: []
 
 infer_processors:
   - class: RobustZScoreNorm

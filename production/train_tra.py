@@ -197,7 +197,9 @@ def train_tra_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Seri
     _install_safe_tra_test_epoch()
 
     tra_yaml = _load_tra_config(cfg)
-    mhd = _build_multihead_dataset(cfg, universe_name, end_date)
+    # Pass model_id="tra" so the handler factory loads TRA's own
+    # learn_processors (without DropnaLabel) — not ALSTM's default.
+    mhd = _build_multihead_dataset(cfg, universe_name, end_date, model_id="tra")
     # num_states must match tra_config.num_states from the YAML so the
     # OT routing receives the same K it was configured for.
     num_states = int(tra_yaml["model"]["kwargs"]["tra_config"]["num_states"])

@@ -34,6 +34,16 @@ handler:
 
 learn_processors:
   - class: DropnaLabel
+  # CSRankNorm on label is critical for ALSTM (qlib's canonical
+  # workflow_config_alstm_Alpha360.yaml line 24 uses it). Without it,
+  # MSE loss is biased toward high-volatility stocks and the model
+  # learns absolute returns rather than cross-sectional ordering —
+  # this is the dominant explanation for low ALSTM IC. Output preds
+  # are in rank-norm space which is fully compatible with rank_average
+  # ensembling (downstream stacker uses raw labels from D.features).
+  - class: CSRankNorm
+    kwargs:
+      fields_group: label
 
 infer_processors:
   - class: RobustZScoreNorm

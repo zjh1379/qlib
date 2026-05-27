@@ -42,7 +42,8 @@ class MultiHeadDataset:
 
 
 def _build_multihead_dataset(
-    cfg, universe_name: str, end_date: date, build_features: bool = True
+    cfg, universe_name: str, end_date: date,
+    build_features: bool = True, model_id: str = "alstm",
 ) -> MultiHeadDataset:
     """Return a descriptor with a per-horizon handler factory (lazy build).
 
@@ -68,15 +69,18 @@ def _build_multihead_dataset(
     if build_features:
         from custom_handler import Alpha360_OpenH
 
-        # Load processors from the ALSTM YAML once per call (closed over by
-        # the factory below).
+        # Load processors from the requested model's YAML (closed over by
+        # the factory below). CRITICAL: previously hard-coded `alstm` here,
+        # which silently injected ALSTM's `DropnaLabel` into TRA's handler
+        # — undoing tra_alpha360.yaml's deliberate omission. Pass
+        # model_id="tra" from train_tra to get TRA's own learn_processors.
         model_cfg_path = REPO_ROOT / [
-            m for m in cfg.model_specs if m["id"] == "alstm"
+            m for m in cfg.model_specs if m["id"] == model_id
         ][0]["config"]
         with model_cfg_path.open(encoding="utf-8") as f:
-            alstm_yaml = yaml.safe_load(f)
-        learn_procs = alstm_yaml.get("learn_processors", [])
-        infer_procs = alstm_yaml.get("infer_processors", [])
+            model_yaml = yaml.safe_load(f)
+        learn_procs = model_yaml.get("learn_processors", [])
+        infer_procs = model_yaml.get("infer_processors", [])
 
         def _factory(horizon_name: str):
             return Alpha360_OpenH(
