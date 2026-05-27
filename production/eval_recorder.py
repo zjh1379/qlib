@@ -91,7 +91,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
         print()
     print(f"Acceptance: {'PASS' if result.acceptance.passed else 'FAIL'}")
     for k, ok in result.acceptance.details.items():
-        print(f"  [{'✓' if ok else '✗'}] {k}")
+        print(f"  [{'x' if ok else ' '}] {k}")
 
     # Write reports
     out_dir = Path(args.out)

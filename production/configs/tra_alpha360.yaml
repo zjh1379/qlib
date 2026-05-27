@@ -50,7 +50,20 @@ handler:
   module_path: custom_handler
 
 learn_processors:
-  - class: DropnaLabel
+  # NOTE: DropnaLabel is DELIBERATELY OMITTED for TRA.
+  #
+  # MTSDatasetH hard-codes use of `handler._learn` for both train AND test
+  # segments (qlib has an open FIXME comment about not supporting `_infer`).
+  # If DropnaLabel is in learn_processors, rows with NaN labels are dropped
+  # from `_learn` — which removes the freshest test dates (5d/20d labels
+  # need future data not yet realized) and makes the test segment empty
+  # → 0 batches → empty pred → rank_average crashes with
+  # "Level datetime not found".
+  #
+  # TRA's transport_fn and loss_fn already mask out NaN-label samples
+  # (see `mask = ~torch.isnan(label)`) so training is safe without
+  # DropnaLabel. Train segment dates are all in the past so they have
+  # realized labels anyway — only the freshest test window is NaN.
 
 infer_processors:
   - class: RobustZScoreNorm

@@ -148,13 +148,14 @@ def _install_safe_tra_test_epoch() -> None:
         # raises KeyError(0). Match the canonical contract.
         if return_pred:
             preds = pd.concat(preds, axis=0) if preds else pd.DataFrame(columns=["score", "label"])
-            if preds.shape[0] > 0 and hasattr(data_set, "restore_index"):
-                try:
-                    preds.index = data_set.restore_index(preds.index)
-                    preds.index = preds.index.swaplevel()
-                    preds.sort_index(inplace=True)
-                except Exception:
-                    pass  # leave as-is on restore failure
+            if preds.shape[0] > 0:
+                # Restore the (instrument, datetime) MultiIndex from the
+                # dataset (preds.index currently holds slice-position ints).
+                # Must succeed — downstream rank_average / stacker depends
+                # on the datetime level. Raise loudly on failure.
+                preds.index = data_set.restore_index(preds.index)
+                preds.index = preds.index.swaplevel()
+                preds.sort_index(inplace=True)
             if probs:
                 probs = pd.concat(probs, axis=0)
             if P_all:
