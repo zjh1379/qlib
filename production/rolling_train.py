@@ -229,10 +229,26 @@ def train_lgbm_horizon(
     )
 
     model = LGBModel(**lgbm_yaml["model"]["kwargs"])
+    # Handler config for daily_inference to rebuild features on new dates.
+    # Strip segment-specific kwargs so daily_inference can substitute its
+    # own start_time / end_time / instruments.
+    handler_cfg = {
+        "class": "Alpha158_OpenH",
+        "module_path": "custom_handler",
+        "kwargs": {
+            "horizon_days": cfg.horizon_days[horizon.name],
+            "fit_start_time": str(s.train_start),
+            "fit_end_time": str(s.train_end),
+            "instruments": universe_name,
+        },
+    }
     with R.start(experiment_name=cfg.experiment_name, recorder_name=f"lgbm_{horizon.name}_{end_date}"):
         model.fit(dataset)
         pred = model.predict(dataset)
         R.save_objects(**{f"pred_{horizon.name}.pkl": pred})
+        # NEW: save calibration + inference artifacts (T3)
+        from production.train_helpers import save_calibration_artifacts
+        save_calibration_artifacts(model, dataset, handler_cfg)
     pred = pred.rename(f"lgbm_{horizon.name}")
     return pred
 

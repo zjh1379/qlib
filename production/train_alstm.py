@@ -151,12 +151,25 @@ def train_alstm_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Se
             },
         )
         model = ALSTM(**model_kwargs)
+        handler_cfg = {
+            "class": "Alpha360_OpenH",
+            "module_path": "custom_handler",
+            "kwargs": {
+                "horizon_days": cfg.horizon_days[h.name],
+                "fit_start_time": mhd.train_segment[0],
+                "fit_end_time": mhd.train_segment[1],
+                "instruments": universe_name,
+            },
+        }
         with R.start(experiment_name=cfg.experiment_name, recorder_name=f"alstm_{h.name}_{end_date}"):
             try:
                 model.fit(dataset)
                 pred = model.predict(dataset)
                 R.save_objects(**{f"pred_{h.name}.pkl": pred})
                 outputs.append(pred.rename(f"alstm_{h.name}"))
+                # NEW: save calibration + inference artifacts (T3)
+                from production.train_helpers import save_calibration_artifacts
+                save_calibration_artifacts(model, dataset, handler_cfg)
             except Exception as exc:
                 _log.warning("alstm_failed_skipping horizon=%s error=%s", h.name, str(exc))
         # Explicitly drop references to the per-horizon handler + dataset +
