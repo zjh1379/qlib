@@ -237,8 +237,14 @@ def train_lgbm_horizon(
     return pred
 
 
-def run_once(cfg: RollingConfig, end_date: date) -> Path:
-    """Run one weekly iteration. Returns the path to the written pred.pkl."""
+def run_once(cfg: RollingConfig, end_date: date, skip_pool: bool = False) -> Path | None:
+    """Run one weekly iteration. Returns the path to the written pred.pkl,
+    or None when `skip_pool=True` (caller is responsible for pooling).
+
+    `skip_pool` is used by `production/run_split.py` to split a memory-heavy
+    end-to-end run into per-model subprocesses: each subprocess trains its
+    models (writes to mlflow recorders) and exits, releasing all memory.
+    """
     init_qlib(cfg)
     members, universe_name = build_universe(cfg, end_date)
     _log.info(
@@ -261,6 +267,14 @@ def run_once(cfg: RollingConfig, end_date: date) -> Path:
         elif spec["id"] == "tra":
             from production.train_tra import train_tra_multihead  # added in T15
             series_list.extend(train_tra_multihead(cfg, universe_name, end_date))
+
+    # Split-run support: when run_split.py launches us per-model, return early
+    # before the ensemble step. Each model's predictions are already saved to
+    # its mlflow recorder; the orchestrator pools them after all subprocesses
+    # finish.
+    if skip_pool:
+        _log.info("skip_pool=True, %d series trained — returning early", len(series_list))
+        return None
 
     base_preds = pd.concat(series_list, axis=1).dropna(how="all")
 
@@ -419,6 +433,26 @@ def main() -> None:
     p_run = sub.add_parser("run-once")
     p_run.add_argument("--end-date", default=None)
     p_run.add_argument("--config", default="production/configs/rolling_ensemble.yaml")
+    p_run.add_argument(
+        "--only-models",
+        default=None,
+        help=(
+            "Comma-separated subset of model ids (lgbm,alstm,tra) to train. "
+            "Other models in cfg are disabled for this invocation. Lets us "
+            "split a heavy training run across multiple subprocesses so each "
+            "model starts with a clean memory state (run_split.py)."
+        ),
+    )
+    p_run.add_argument(
+        "--skip-pool",
+        action="store_true",
+        help=(
+            "Skip the ensemble pool + pred_<date>.pkl write step. Use when "
+            "splitting a run across multiple subprocesses — the orchestrator "
+            "(run_split.py) does the pool after all models are trained, by "
+            "reading the per-model mlflow recorders."
+        ),
+    )
 
     p_back = sub.add_parser("backfill",
         help="Loop run-once over every Friday in [start, end]. ~5-30 min per week.")
@@ -431,8 +465,18 @@ def main() -> None:
     if args.cmd == "run-once":
         end = date.fromisoformat(args.end_date) if args.end_date else date.today()
         cfg = load_config(REPO_ROOT / args.config)
-        path = run_once(cfg, end)
-        print(f"OK: wrote {path}")
+        # Filter cfg.model_specs to the requested subset (split-mode).
+        if args.only_models:
+            wanted = {m.strip() for m in args.only_models.split(",") if m.strip()}
+            for spec in cfg.model_specs:
+                if spec["id"] not in wanted:
+                    spec["enabled"] = False
+            _log.info("run_once_only_models=%s", sorted(wanted))
+        path = run_once(cfg, end, skip_pool=args.skip_pool)
+        if path is not None:
+            print(f"OK: wrote {path}")
+        else:
+            print("OK: training done, pool skipped")
     elif args.cmd == "backfill":
         cfg = load_config(REPO_ROOT / args.config)
         paths = run_backfill(cfg, date.fromisoformat(args.start), date.fromisoformat(args.end))
