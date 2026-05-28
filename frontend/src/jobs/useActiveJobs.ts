@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/api/client';
 
-export type ActiveJobKind = 'refresh' | 'retrain' | 'evaluation';
+export type ActiveJobKind = 'refresh' | 'retrain' | 'evaluation' | 'inference';
 
 export interface ActiveJob {
   kind: ActiveJobKind;
@@ -44,6 +44,13 @@ export function useActiveJobs(): ActiveJob[] {
     queryFn: () => api.data.evalActive(),
     staleTime: 5_000,
     refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
+  });
+  const { data: inference } = useQuery({
+    queryKey: ['jobs', 'inference', 'active'],
+    queryFn: () => api.inference.active(),
+    staleTime: 3_000,
+    refetchInterval: 3_000,
     refetchIntervalInBackground: true,
   });
 
@@ -102,6 +109,30 @@ export function useActiveJobs(): ActiveJob[] {
       started_at: evals[0]?.started_at,
       href: '/evaluation',
     });
+  }
+
+  if (inference) {
+    const status = inference.status as ActiveJob['status'];
+    const recent =
+      inference.started_at && Date.now() - new Date(inference.started_at).getTime() < 60_000;
+    if (status === 'running' || (recent && (status === 'done' || status === 'failed'))) {
+      out.push({
+        kind: 'inference',
+        label:
+          status === 'running'
+            ? '模型推理'
+            : status === 'done'
+              ? '✓ 推理完成'
+              : '✗ 推理失败',
+        detail:
+          inference.new_rows != null
+            ? `+${inference.new_rows} 行`
+            : inference.end_date ?? undefined,
+        status,
+        started_at: inference.started_at,
+        href: '/picks',
+      });
+    }
   }
 
   return out;

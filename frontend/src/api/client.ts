@@ -259,6 +259,44 @@ export const api = {
       return request<R>(`/api/evaluation/compare?${q.toString()}`);
     },
   },
+  inference: {
+    active: () =>
+      request<{
+        job_id: string;
+        status: 'running' | 'done' | 'failed';
+        started_at: string;
+        finished_at: string | null;
+        end_date: string | null;
+        error: string | null;
+        new_rows: number | null;
+        reason: string | null;
+      } | null>('/api/inference/active/peek'),
+    status: () =>
+      request<{
+        last_run_at: string | null;
+        last_success_at: string | null;
+        last_error: string | null;
+        is_running: boolean;
+      }>('/api/inference/status'),
+    runNow: (force = false) => {
+      const q = new URLSearchParams({ force: String(force) });
+      return request<{ status: string; job_id: string | null }>(
+        `/api/inference/run-now?${q.toString()}`,
+        { method: 'POST' },
+      );
+    },
+    getJob: (jobId: string) =>
+      request<{
+        job_id: string;
+        status: 'running' | 'done' | 'failed';
+        started_at: string;
+        finished_at: string | null;
+        end_date: string | null;
+        error: string | null;
+        new_rows: number | null;
+        reason: string | null;
+      }>(`/api/inference/jobs/${encodeURIComponent(jobId)}`),
+  },
   scheduling: {
     getRetrain: () => {
       type R = paths['/api/scheduling/retrain']['get']['responses']['200']['content']['application/json'];
