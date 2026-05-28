@@ -119,11 +119,28 @@ export function useMarkets() {
 export function useAddSymbol() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (symbol: string) => api.data.addSymbol(symbol),
+    mutationFn: async (symbol: string) => {
+      // Issue an immediate "添加中" toast that survives page navigation
+      // — add-symbol blocks for 10-30s on baostock + dump_bin, and a user
+      // who switches pages mid-wait otherwise has no feedback.
+      const { toast, dismiss } = await import('@/jobs/toast');
+      const toastId = toast.info(`正在添加 ${symbol} (下载历史 K 线 …~30s)`, -1);
+      try {
+        const result = await api.data.addSymbol(symbol);
+        dismiss(toastId);
+        toast.success(`${symbol} 已添加 (${result.fetched_rows} 行)`);
+        return result;
+      } catch (e) {
+        dismiss(toastId);
+        throw e;  // re-throw so MutationCache.onError shows the error toast
+      }
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['instruments'] });
       qc.invalidateQueries({ queryKey: ['data', 'markets'] });
       qc.invalidateQueries({ queryKey: ['data', 'status'] });
     },
+    // Custom toasts above; let the global MutationCache.onError handle
+    // additional surfacing of the same error (extra red banner is fine).
   });
 }

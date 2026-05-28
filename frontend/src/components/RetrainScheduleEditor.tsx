@@ -32,7 +32,26 @@ export default function RetrainScheduleEditor() {
   const runNowMut = useRunRetrainNow();
   const qc = useQueryClient();
   const rollbackMut = useMutation({
-    mutationFn: async () => api.models.rollback('previous_1'),
+    mutationFn: async () => {
+      // Toast lifecycle: 'in progress' → success/error survives navigation.
+      const { toast, dismiss } = await import('@/jobs/toast');
+      const tid = toast.info('正在回滚到上一周模型 …', -1);
+      try {
+        const r = await api.models.rollback('previous_1');
+        dismiss(tid);
+        if (r.status === 'rolled_back') {
+          toast.success(
+            `已回滚 · 归档 ${r.archived_recorder_id?.slice(0, 8)} · 新 current ${r.new_current_recorder_id?.slice(0, 8)}`,
+          );
+        } else {
+          toast.warning(`回滚未执行: ${r.reason ?? '(无原因)'}`);
+        }
+        return r;
+      } catch (e) {
+        dismiss(tid);
+        throw e;
+      }
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['model-version'] });
     },
