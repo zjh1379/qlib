@@ -79,7 +79,7 @@ def get_chart(
     if with_pred and len(actual) >= 3:
         recorder_id = get_latest_recorder_id(experiment)
         meta["recorder_id"] = recorder_id
-        pred_series = load_pred(recorder_id, experiment_name=experiment)
+        pred_series = load_pred(recorder_id, experiment_name=experiment, series_only=True)
         if symbol in pred_series.index.get_level_values("instrument").unique():
             scores = pred_series.xs(symbol, level="instrument").sort_index()
             score_map = {str(t.date()): float(v) for t, v in scores.items()}

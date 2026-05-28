@@ -30,6 +30,7 @@ export default function Picks() {
     days: WINDOW_DAYS,
     min_top: MIN_TOP,
     view: params.view,
+    models: params.models,
   });
 
   // Client-side filter (cheap; runs on every render).
@@ -59,6 +60,8 @@ export default function Picks() {
           reset();
           setSort(DEFAULT_SORT);
         }}
+        availableModels={data?.available_models ?? []}
+        activeModels={data?.active_models ?? null}
       />
 
       <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-5">

@@ -96,10 +96,20 @@ def candidates_endpoint(
     min_top: int = Query(default=0, ge=0),
     experiment: str | None = Query(default=None),
     view: str = Query(default="ensemble", pattern="^(ensemble|lightgbm|alstm|tra)$"),
+    models: str | None = Query(
+        default=None,
+        description=(
+            "Comma-separated list of base column names (e.g. "
+            "'lgbm_1d,lgbm_5d,tra_5d') to use as the ensemble score. "
+            "When set, takes precedence over `view`. Empty or 'all' → use "
+            "the pool-time default score (e.g. v9 = 1d+5d cols)."
+        ),
+    ),
 ):
-    """Return the full candidate pool (cached per recorder + view + base params).
+    """Return the full candidate pool (cached per recorder + view + models + base params).
     Frontend fetches this ONCE, then applies filter + sort client-side. No filter
     query params here — Tier 1 filters apply in the browser."""
     return service.candidates(
-        top=top, days=days, min_top=min_top, experiment=experiment, view=view
+        top=top, days=days, min_top=min_top, experiment=experiment,
+        view=view, models=models,
     )

@@ -43,6 +43,16 @@ export function serializeBoards(boards: Board[]): string {
   return boards.join(',');
 }
 
+/** Parse comma-separated list of base model+horizon names (e.g. "lgbm_1d,tra_5d").
+ *  Returns empty array when missing or empty — semantically meaning "use pool default". */
+export function parseModels(raw: string | null): string[] {
+  if (raw === null || raw === '') return [];
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 /** Parse a URLSearchParams instance into FilterParams, falling back to DEFAULT_FILTERS for any missing key. */
 export function paramsFromUrl(sp: URLSearchParams): FilterParams {
   return {
@@ -50,6 +60,7 @@ export function paramsFromUrl(sp: URLSearchParams): FilterParams {
     days: parseInt32(sp.get('days'), DEFAULT_FILTERS.days),
     min_top: parseInt32(sp.get('min_top'), DEFAULT_FILTERS.min_top),
     view: parseEnum(sp.get('view'), VIEWS, DEFAULT_FILTERS.view),
+    models: parseModels(sp.get('models')),
     min_price: parseFloat32(sp.get('min_price'), DEFAULT_FILTERS.min_price),
     max_price: parseFloat32(sp.get('max_price'), DEFAULT_FILTERS.max_price),
     pct_change_n: parseEnum<PctChangeN>(
@@ -93,6 +104,7 @@ export function urlFromParams(p: FilterParams): URLSearchParams {
   setIfChanged('days', p.days);
   setIfChanged('min_top', p.min_top);
   setIfChanged('view', p.view);
+  setIfChanged('models', p.models);
   setIfChanged('min_price', p.min_price);
   setIfChanged('max_price', p.max_price);
   setIfChanged('pct_change_n', p.pct_change_n);

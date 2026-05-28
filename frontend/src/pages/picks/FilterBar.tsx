@@ -8,6 +8,13 @@ interface FilterBarProps {
   candidateCount: number | null;
   onChange: (patch: Partial<FilterParams>) => void;
   onReset: () => void;
+  /** Base model+horizon names available in the active recorder (e.g.
+   *  ['lgbm_1d', 'lgbm_5d', ..., 'tra_20d']). When empty, model selector
+   *  is hidden (fresh page load before first response). */
+  availableModels?: string[];
+  /** Subset actually used as score by the current response. `null` means
+   *  the recorder's pool-time default (e.g. v9 = 1d+5d cols). */
+  activeModels?: string[] | null;
 }
 
 const VIEW_OPTIONS: { value: View; label: string }[] = [
@@ -17,7 +24,10 @@ const VIEW_OPTIONS: { value: View; label: string }[] = [
   { value: 'tra', label: 'TRA' },
 ];
 
-export function FilterBar({ params, resultCount, candidateCount, onChange, onReset }: FilterBarProps) {
+export function FilterBar({
+  params, resultCount, candidateCount, onChange, onReset,
+  availableModels = [], activeModels = null,
+}: FilterBarProps) {
   return (
     <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-5 space-y-5">
       {/* Header: result count + reset */}
@@ -46,6 +56,16 @@ export function FilterBar({ params, resultCount, candidateCount, onChange, onRes
           <NumberField label="最少进 top N 天数" value={params.min_top} min={0} max={params.days} onChange={(v) => onChange({ min_top: v })} />
         </div>
       </div>
+
+      {/* Group 1.5: 模型组合 (immediate update; triggers backend refetch) */}
+      {availableModels.length > 0 && (
+        <ModelSelector
+          available={availableModels}
+          selected={params.models}
+          active={activeModels}
+          onChange={(models) => onChange({ models })}
+        />
+      )}
 
       {/* Group 2: 价格 (debounced) */}
       <div>
@@ -203,6 +223,111 @@ function DebouncedField({
         className="mt-1 w-full rounded-md bg-[#161b22] border border-[#30363d] px-3 h-9 text-sm focus:outline-none focus:border-[#1f6feb]"
       />
     </label>
+  );
+}
+
+/** Model selector. Grid: rows = base model (lgbm/alstm/tra), cols = horizon
+ *  (1d/5d/20d). 0 selected = use the recorder's pool-time default score.
+ *  1+ selected = backend recomputes score as -rank_avg over the chosen
+ *  base columns. Selecting just 1 column makes the picks page rank the
+ *  whole universe by that single column.
+ */
+function ModelSelector({
+  available, selected, active, onChange,
+}: {
+  available: string[];
+  selected: string[];
+  active: string[] | null;
+  onChange: (next: string[]) => void;
+}) {
+  // Parse "lgbm_1d" → { base: 'lgbm', horizon: '1d' }
+  const parse = (col: string) => {
+    const m = col.match(/^([a-z]+)_(\d+d)$/i);
+    return m ? { base: m[1], horizon: m[2] } : { base: col, horizon: '' };
+  };
+  const bases = Array.from(new Set(available.map((c) => parse(c).base)));
+  const horizons = Array.from(new Set(available.map((c) => parse(c).horizon))).filter(Boolean);
+  // Preserve natural horizon order: 1d, 5d, 20d, ...
+  horizons.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+  bases.sort();  // lgbm, alstm, tra (alphabetical OK for now)
+
+  const toggle = (col: string) => {
+    const set = new Set(selected);
+    if (set.has(col)) set.delete(col);
+    else set.add(col);
+    onChange(Array.from(set).sort());
+  };
+
+  // Quick-preset buttons
+  const selectAll = () => onChange([...available].sort());
+  const selectNone = () => onChange([]);
+  const selectByHorizon = (horizon: string) =>
+    onChange(available.filter((c) => parse(c).horizon === horizon).sort());
+
+  const baseLabel: Record<string, string> = {
+    lgbm: 'LightGBM', alstm: 'ALSTM', tra: 'TRA',
+  };
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-2">
+        <h3 className="text-[10px] text-[#6e7681] uppercase tracking-wider">
+          模型组合 ({selected.length || '使用默认'})
+        </h3>
+        <div className="flex items-center gap-2 text-[10px]">
+          <button onClick={selectNone} className="px-1.5 py-0.5 rounded bg-[#21262d] hover:bg-[#30363d] border border-[#30363d]">默认</button>
+          {horizons.map((h) => (
+            <button key={h} onClick={() => selectByHorizon(h)} className="px-1.5 py-0.5 rounded bg-[#21262d] hover:bg-[#30363d] border border-[#30363d]">
+              全 {h}
+            </button>
+          ))}
+          <button onClick={selectAll} className="px-1.5 py-0.5 rounded bg-[#21262d] hover:bg-[#30363d] border border-[#30363d]">全选</button>
+        </div>
+      </div>
+      <table className="text-xs border-collapse">
+        <thead>
+          <tr>
+            <th className="text-left pr-3 text-[#6e7681] font-normal">模型 ╲ Horizon</th>
+            {horizons.map((h) => (
+              <th key={h} className="px-3 text-center text-[#6e7681] font-normal">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {bases.map((base) => (
+            <tr key={base}>
+              <td className="pr-3 py-1 text-[#8b949e]">{baseLabel[base] ?? base}</td>
+              {horizons.map((h) => {
+                const col = `${base}_${h}`;
+                if (!available.includes(col)) {
+                  return <td key={h} className="px-3 py-1 text-center text-[#30363d]">—</td>;
+                }
+                return (
+                  <td key={h} className="px-3 py-1 text-center">
+                    <label className="inline-flex items-center justify-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(col)}
+                        onChange={() => toggle(col)}
+                        className="accent-[#1f6feb]"
+                        title={col}
+                      />
+                    </label>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="text-[10px] text-[#6e7681] mt-2">
+        {selected.length === 0 ? (
+          <>0 选中 → 使用 pool 默认分数（当前: <span className="text-[#8b949e]">{(active ?? ['<default>']).join(', ')}</span>）</>
+        ) : (
+          <>{selected.length} 列等权 rank-avg → 后端会重算分数 + 重新排名（首次请求 ~5s）</>
+        )}
+      </p>
+    </div>
   );
 }
 

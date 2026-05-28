@@ -44,6 +44,7 @@ export function useCandidates(
     days?: number;
     min_top?: number;
     view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
+    models?: string[];
   } = {},
 ) {
   return useQuery({

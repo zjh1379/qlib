@@ -362,11 +362,23 @@ def get_latest_recorder_id(experiment_name: str) -> str:
     )
 
 
-def load_pred(recorder_id: str, experiment_name: str = "daily_cn_fresh") -> pd.Series:
+def load_pred(
+    recorder_id: str,
+    experiment_name: str = "daily_cn_fresh",
+    series_only: bool = False,
+) -> "pd.DataFrame | pd.Series":
+    """Load pred.pkl from a recorder.
+
+    Returns the original object (DataFrame for rolling_v2_ensemble with score
+    + consensus + per-model base columns, Series for older single-column
+    formats). Pass `series_only=True` to coerce a DataFrame to its score
+    Series (legacy behaviour; use when the caller only needs the unified
+    score and not the per-model base columns).
+    """
     init_qlib_once()
     exp = R.get_exp(experiment_name=experiment_name)
     rec = exp.get_recorder(recorder_id=recorder_id)
     pred = rec.load_object("pred.pkl")
-    if isinstance(pred, pd.DataFrame):
+    if series_only and isinstance(pred, pd.DataFrame):
         pred = pred["score"]
     return pred

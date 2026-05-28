@@ -148,24 +148,39 @@ def candidates(
     min_top: int = 0,
     experiment: str | None = None,
     view: str = "ensemble",
+    models: str | None = None,
 ) -> dict:
     """Return the full candidate pool (over-fetched, no filters) with complete
-    Tier 1 metrics, cached per (recorder_id, view, top, days, min_top).
+    Tier 1 metrics, cached per (recorder_id, view, models, top, days, min_top).
 
     Frontend pulls this ONCE per session/view and does filter + sort
     client-side. Cache invalidates automatically when a new recorder is trained
     (recorder_id is part of the key) or on backend restart.
+
+    Args:
+        models: comma-separated list of base column names to use for the
+            ensemble score (e.g. "lgbm_1d,lgbm_5d,tra_5d"). When provided,
+            the score is dynamically recomputed as -rank_avg over those
+            columns only, overriding the pred.pkl's stored score. Unknown
+            column names are silently dropped. None / empty / "all" → use
+            the stored score (which was computed at pool time per the
+            current ensemble convention, e.g. v9 = 1d+5d cols only).
+            Takes precedence over `view`.
     """
     init_qlib_once()
     s = Settings()
     exp = experiment or s.default_experiment
     recorder_id = get_latest_recorder_id(exp)
-    cached = _candidates_cached(recorder_id, exp, view, top, days, min_top)
+    # Normalise models param into a hashable, order-independent key for caching.
+    models_key: tuple[str, ...] = ()
+    if models and models.strip().lower() not in ("", "all"):
+        models_key = tuple(sorted({m.strip() for m in models.split(",") if m.strip()}))
+    cached = _candidates_cached(recorder_id, exp, view, top, days, min_top, models_key)
     # Return a shallow copy so callers can mutate without poisoning the cache.
     return {**cached, "items": list(cached["items"])}
 
 
-@functools.lru_cache(maxsize=16)
+@functools.lru_cache(maxsize=32)
 def _candidates_cached(
     recorder_id: str,
     exp: str,
@@ -173,6 +188,7 @@ def _candidates_cached(
     top: int,
     days: int,
     min_top: int,
+    models_key: tuple[str, ...] = (),
 ) -> dict:
     """Heavy path: load pred.pkl, build screen items, fetch full metrics, populate
     all schema fields. Cached by lru_cache; do NOT call directly — use candidates()."""
@@ -194,13 +210,25 @@ def _candidates_cached(
     if df.index.names != ["datetime", "instrument"]:
         df.index = df.index.set_names(["datetime", "instrument"])
 
-    if view != "ensemble":
+    # Dynamic score recomputation: `models_key` takes precedence. If absent,
+    # fall back to legacy `view` param. Empty key → use df["score"] as-is
+    # from pred.pkl (already rank_avg + EWMA at pool time).
+    score_cols: list[str] | None = None
+    if models_key:
+        score_cols = [c for c in models_key if c in df.columns]
+    elif view != "ensemble":
         _view_prefix = {"lightgbm": "lgbm_", "alstm": "alstm_", "tra": "tra_"}
         prefix = _view_prefix.get(view, f"{view}_")
-        view_cols = [c for c in df.columns if c.startswith(prefix)]
-        if view_cols:
-            df = df.copy()
-            df["score"] = df[view_cols].mean(axis=1)
+        score_cols = [c for c in df.columns if c.startswith(prefix)]
+
+    if score_cols:
+        df = df.copy()
+        ranks = df[score_cols].groupby(level="datetime").rank(ascending=False, method="min")
+        df["score"] = -ranks.mean(axis=1, skipna=True)
+        # Re-apply EWMA so dynamic scores get the same temporal smoothing
+        # the pool-time score has — adds ~30ms but keeps semantics consistent.
+        from production.post_process import ewma_smooth
+        df = ewma_smooth(df, alpha=0.5, score_col="score")
 
     dates = df.index.get_level_values("datetime").unique().sort_values()
     today = dates[-1]
@@ -229,12 +257,18 @@ def _candidates_cached(
             it.board = parse_board(it.symbol)
             it.is_st = is_st_name(it.name)
 
+    available_models = sorted(
+        c for c in df.columns if c not in ("score", "consensus")
+    )
+
     return {
         "experiment": exp,
         "recorder_id": recorder_id,
         "latest_date": str(today.date()),
         "window_days": days,
         "universe_size": universe_size,
+        "available_models": available_models,
+        "active_models": list(score_cols) if score_cols else None,
         "items": [it.model_dump() for it in items],
     }
 
@@ -307,7 +341,10 @@ def screen(
         view_cols = [c for c in df.columns if c.startswith(prefix)]
         if view_cols:
             df = df.copy()
-            df["score"] = df[view_cols].mean(axis=1)
+            # rank-avg the matched cols (was simple mean, but rank-avg
+            # matches pool-time semantics + handles scale differences)
+            ranks = df[view_cols].groupby(level="datetime").rank(ascending=False, method="min")
+            df["score"] = -ranks.mean(axis=1, skipna=True)
 
     dates = df.index.get_level_values("datetime").unique().sort_values()
     today = dates[-1]

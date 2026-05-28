@@ -20,6 +20,10 @@ export interface FilterParams {
   days: number;
   min_top: number;
   view: View;
+  /** Subset of base columns to use as ensemble score (e.g. ['lgbm_1d',
+   *  'tra_5d']). Empty = use the pool-time default score (currently
+   *  v9 = 1d + 5d cols). Takes precedence over `view`. */
+  models: string[];
   min_price: number | null;
   max_price: number | null;
   // Tier 1
@@ -42,6 +46,7 @@ export const DEFAULT_FILTERS: FilterParams = {
   days: 5,
   min_top: 0,
   view: 'ensemble',
+  models: [],
   min_price: null,
   max_price: 30,
   pct_change_n: 5,

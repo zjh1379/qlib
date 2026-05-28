@@ -288,7 +288,7 @@ export interface paths {
         };
         /**
          * Candidates Endpoint
-         * @description Return the full candidate pool (cached per recorder + view + base params).
+         * @description Return the full candidate pool (cached per recorder + view + models + base params).
          *     Frontend fetches this ONCE, then applies filter + sort client-side. No filter
          *     query params here — Tier 1 filters apply in the browser.
          */
@@ -472,6 +472,11 @@ export interface components {
          * CandidatesResponse
          * @description Same shape as ScreenResponse; semantically a 'no filters applied' candidate pool
          *     intended for client-side filter + sort. Returned by GET /api/models/candidates.
+         *
+         *     Includes the list of base model+horizon columns available in the underlying
+         *     pred.pkl (e.g. lgbm_1d, lgbm_5d, tra_5d…) so the frontend can render a
+         *     model picker, and the subset actually used for the current score when a
+         *     custom `models` query param was supplied (None means the pool-time default).
          */
         CandidatesResponse: {
             /** Experiment */
@@ -484,6 +489,10 @@ export interface components {
             window_days: number;
             /** Universe Size */
             universe_size: number;
+            /** Available Models */
+            available_models?: string[];
+            /** Active Models */
+            active_models?: string[] | null;
             /** Items */
             items: components["schemas"]["ScreenItem"][];
         };
@@ -1734,6 +1743,8 @@ export interface operations {
                 min_top?: number;
                 experiment?: string | null;
                 view?: string;
+                /** @description Comma-separated list of base column names (e.g. 'lgbm_1d,lgbm_5d,tra_5d') to use as the ensemble score. When set, takes precedence over `view`. Empty or 'all' → use the pool-time default score (e.g. v9 = 1d+5d cols). */
+                models?: string | null;
             };
             header?: never;
             path?: never;

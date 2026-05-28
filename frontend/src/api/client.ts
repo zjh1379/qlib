@@ -167,6 +167,7 @@ export const api = {
         min_top?: number;
         experiment?: string;
         view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
+        models?: string[];
       } = {},
     ) => {
       type R = paths['/api/models/candidates']['get']['responses']['200']['content']['application/json'];
@@ -176,6 +177,7 @@ export const api = {
       if (params.min_top !== undefined) q.set('min_top', String(params.min_top));
       if (params.experiment) q.set('experiment', params.experiment);
       if (params.view) q.set('view', params.view);
+      if (params.models && params.models.length > 0) q.set('models', params.models.join(','));
       const qs = q.toString();
       return request<R>(`/api/models/candidates${qs ? '?' + qs : ''}`);
     },

@@ -40,12 +40,20 @@ class ScreenResponse(BaseModel):
 
 class CandidatesResponse(BaseModel):
     """Same shape as ScreenResponse; semantically a 'no filters applied' candidate pool
-    intended for client-side filter + sort. Returned by GET /api/models/candidates."""
+    intended for client-side filter + sort. Returned by GET /api/models/candidates.
+
+    Includes the list of base model+horizon columns available in the underlying
+    pred.pkl (e.g. lgbm_1d, lgbm_5d, tra_5d…) so the frontend can render a
+    model picker, and the subset actually used for the current score when a
+    custom `models` query param was supplied (None means the pool-time default).
+    """
     experiment: str
     recorder_id: str
     latest_date: str
     window_days: int
     universe_size: int
+    available_models: list[str] = Field(default_factory=list)
+    active_models: list[str] | None = None
     items: list[ScreenItem]
 
 
