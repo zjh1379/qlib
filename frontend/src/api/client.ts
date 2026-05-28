@@ -66,6 +66,14 @@ export const api = {
         paths['/api/data/refresh/{job_id}']['get']['responses']['200']['content']['application/json'];
       return request<R>(`/api/data/refresh/${encodeURIComponent(jobId)}`);
     },
+    refreshActive: () => {
+      // Returns {job_id, status, started_at} or null. Used by
+      // useActiveRefreshJob() on mount to recover progress after a page
+      // navigation.
+      return request<{ job_id: string; status: string; started_at: string } | null>(
+        '/api/data/refresh/active/peek',
+      );
+    },
     markets: () => {
       type R = paths['/api/data/markets']['get']['responses']['200']['content']['application/json'];
       return request<R>('/api/data/markets');

@@ -89,6 +89,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/data/refresh/active/peek": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Refresh Active
+         * @description Return the most recent refresh job (running or finished), so the UI
+         *     can recover progress after a page navigation. None if no jobs ever ran
+         *     this process. Frontend's `useActiveRefreshJob` calls this on mount.
+         */
+        get: operations["refresh_active_api_data_refresh_active_peek_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/data/markets": {
         parameters: {
             query?: never;
@@ -1304,6 +1326,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_active_api_data_refresh_active_peek_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    } | null;
                 };
             };
         };

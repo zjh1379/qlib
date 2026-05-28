@@ -11,6 +11,7 @@ from app.data.schemas import (
 )
 from app.data.service import (
     add_custom_symbol,
+    get_active_refresh_job,
     get_data_status,
     get_refresh_status,
     list_instruments_for,
@@ -38,6 +39,14 @@ def refresh() -> RefreshResponse:
 @router.get("/refresh/{job_id}", response_model=RefreshJobStatus)
 def refresh_status(job_id: str) -> RefreshJobStatus:
     return get_refresh_status(job_id)
+
+
+@router.get("/refresh/active/peek")
+def refresh_active() -> dict | None:
+    """Return the most recent refresh job (running or finished), so the UI
+    can recover progress after a page navigation. None if no jobs ever ran
+    this process. Frontend's `useActiveRefreshJob` calls this on mount."""
+    return get_active_refresh_job()
 
 
 @router.get("/markets", response_model=MarketsResponse)

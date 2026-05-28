@@ -1,4 +1,5 @@
 import { Link, Outlet } from 'react-router-dom';
+import ActiveJobsBadge from '@/components/ActiveJobsBadge';
 import SymbolSearch from '@/components/SymbolSearch';
 import { cn } from '@/lib/utils';
 
@@ -19,6 +20,9 @@ export default function Layout() {
         <div className="flex-1 max-w-md ml-auto">
           <SymbolSearch size="sm" placeholder="搜索股票…" />
         </div>
+        {/* Persistent indicator for backend background jobs (data refresh,
+            etc). Visible on every page so progress survives navigation. */}
+        <ActiveJobsBadge />
       </header>
       <main className="flex-1 p-6">
         <Outlet />

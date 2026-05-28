@@ -1,7 +1,12 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { useDataStatus, useMarkets, useRefreshData, useRefreshJob } from '@/data/hooks';
+import {
+  useActiveRefreshJob,
+  useDataStatus,
+  useMarkets,
+  useRefreshData,
+  useRefreshJob,
+} from '@/data/hooks';
 import SymbolSearch, { loadRecent } from '@/components/SymbolSearch';
 import { api } from '@/api/client';
 import { cn } from '@/lib/utils';
@@ -76,13 +81,13 @@ function ModelVersionCard() {
 export default function Dashboard() {
   const { data: status, isPending: statusPending, error: statusError } = useDataStatus();
   const refreshMut = useRefreshData();
-  const [jobId, setJobId] = useState<string | null>(null);
+  // Active job is sourced from backend (`/refresh/active/peek`) + localStorage,
+  // not from local component state — survives page navigation + browser refresh.
+  const jobId = useActiveRefreshJob();
   const { data: jobStatus } = useRefreshJob(jobId);
 
   const startRefresh = () => {
-    refreshMut.mutate(undefined, {
-      onSuccess: (r) => setJobId(r.job_id),
-    });
+    refreshMut.mutate();   // useRefreshData persists job_id to localStorage in onSuccess
   };
 
   const recent = loadRecent();

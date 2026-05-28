@@ -290,6 +290,34 @@ def _wait_and_update(job_id: str, proc: subprocess.Popen, log_path: Path) -> Non
         pass
 
 
+def get_active_refresh_job() -> dict | None:
+    """Return the most recent non-terminal refresh job, or the most recent
+    job overall if none is running. Lets the frontend recover progress
+    after a page navigation / browser refresh.
+
+    Shape: {"job_id": str, "status": "running"|"done"|"failed", "started_at": str}
+           or None if no jobs have ever been started this process.
+    """
+    with _running_state_lock:
+        if _running_job_id and _running_job_id in _refresh_jobs:
+            entry = _refresh_jobs[_running_job_id]
+            return {
+                "job_id": entry["job_id"],
+                "status": entry["status"],
+                "started_at": entry["started_at"],
+            }
+        # No running job — return the most recently finished one so the UI
+        # can render a "✓ done at …" badge after the user navigates back.
+        if not _refresh_jobs:
+            return None
+        last = max(_refresh_jobs.values(), key=lambda e: e.get("started_at", ""))
+        return {
+            "job_id": last["job_id"],
+            "status": last["status"],
+            "started_at": last["started_at"],
+        }
+
+
 def start_refresh() -> RefreshResponse:
     global _running_job_id
     # Try to acquire the global running lock without blocking
