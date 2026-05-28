@@ -3,6 +3,13 @@
 experiment_name: rolling_v2_ensemble
 
 universe: csi800   # CSI300 + CSI500 PIT union
+# Extra markets to union into the training universe (allows the model to
+# produce predictions for ETFs + user-added custom symbols). These are
+# small (~43 symbols) so they don't materially affect csi800 model quality
+# but they let Picks/Charts show predictions for the user's watchlist.
+universe_extras:
+  - etfs
+  - custom
 provider_uri: ~/.qlib/qlib_data/cn_data_bs
 region: cn
 

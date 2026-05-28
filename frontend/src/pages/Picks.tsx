@@ -209,9 +209,10 @@ function formatPct(v: number): string {
 }
 
 function pctColorClass(v: number | null | undefined): string {
+  // A-share convention: red = up, green = down
   if (v == null) return 'text-[#8b949e]';
-  if (v > 0.005) return 'text-green-400';
-  if (v < -0.005) return 'text-red-400';
+  if (v > 0.005) return 'text-red-400';
+  if (v < -0.005) return 'text-green-400';
   return 'text-[#8b949e]';
 }
 

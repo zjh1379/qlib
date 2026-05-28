@@ -139,12 +139,32 @@ def members_on(df: pd.DataFrame, query_date: date) -> list[str]:
     return df.loc[dates_ts == cutoff, "instrument"].unique().tolist()
 
 
+def _read_market_file(qlib_data_root: Path, market: str) -> list[str]:
+    """Read an existing qlib instruments file (e.g. 'etfs', 'custom').
+    Returns the list of symbol codes. Skips silently if file missing or
+    unreadable."""
+    p = qlib_data_root / "instruments" / f"{market}.txt"
+    if not p.exists():
+        return []
+    try:
+        out: list[str] = []
+        for line in p.read_text(encoding="utf-8").splitlines():
+            tok = line.split("\t", 1)
+            if tok and tok[0].strip():
+                out.append(tok[0].strip())
+        return out
+    except Exception as exc:
+        _log.warning("read_market_file_failed market=%s error=%s", market, exc)
+        return []
+
+
 def write_pit_instruments_file(
     df: pd.DataFrame,
     end_date: date,
     name: str,
     qlib_data_root: Path,
     lookback_years: int = 7,
+    extra_markets: list[str] | None = None,
 ) -> Path:
     """Write a qlib-compatible instruments file at
     `<qlib_data_root>/instruments/<name>.txt`.
@@ -169,15 +189,30 @@ def write_pit_instruments_file(
     window_mask = (dates_ts >= start_ts) & (dates_ts <= end_ts)
     members = sorted(df.loc[window_mask, "instrument"].unique().tolist())
 
+    # Optionally union with non-PIT extras (ETFs, custom symbols). These
+    # don't have monthly PIT snapshots — we use the same window for all
+    # symbols in the extras list. The training pipeline still per-day
+    # filters via members_on(...) for csi800 members; extras pass through
+    # because they're always "members" (not subject to PIT filtering).
+    extras: set[str] = set()
+    if extra_markets:
+        for market in extra_markets:
+            for sym in _read_market_file(qlib_data_root, market):
+                if sym not in members:
+                    extras.add(sym)
+        extras -= set(members)  # dedup
+
+    all_members = sorted(set(members) | extras)
+
     out_dir = qlib_data_root / "instruments"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{name}.txt"
     start_iso = start_date.isoformat()
     end_iso = end_date.isoformat()
-    lines = [f"{inst}\t{start_iso}\t{end_iso}" for inst in members]
+    lines = [f"{inst}\t{start_iso}\t{end_iso}" for inst in all_members]
     out_path.write_text("\n".join(lines) + "\n")
     _log.info(
-        "pit_instruments_written path=%s count=%d name=%s",
-        str(out_path), len(members), name,
+        "pit_instruments_written path=%s count=%d name=%s extras=%d",
+        str(out_path), len(all_members), name, len(extras),
     )
     return out_path

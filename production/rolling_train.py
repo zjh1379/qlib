@@ -74,6 +74,10 @@ class RollingConfig:
     ewma_alpha: float
     cost_bps: float
     archive_weeks: int
+    # Extra markets (e.g. 'etfs', 'custom') to union into the PIT csi800
+    # universe — lets the trained model also produce predictions for these
+    # symbols even though they're not in the csi300+csi500 base.
+    universe_extras: list[str] | None = None
 
 
 def load_config(path: Path) -> RollingConfig:
@@ -105,6 +109,7 @@ def load_config(path: Path) -> RollingConfig:
         ewma_alpha=raw["post_process"]["ewma_alpha"],
         cost_bps=raw["post_process"]["cost_bps"],
         archive_weeks=raw["mlruns_archive"]["keep_weeks"],
+        universe_extras=raw.get("universe_extras") or None,
     )
 
 
@@ -155,7 +160,16 @@ def build_universe(cfg: RollingConfig, end_date: date) -> tuple[list[str], str]:
         name=universe_name,
         qlib_data_root=qlib_data_root,
         lookback_years=longest_lookback + 1,  # +1 for safety
+        extra_markets=cfg.universe_extras,
     )
+    # Add the extras to `members` too so the consensus/scorecard and
+    # downstream label fetches include them.
+    if cfg.universe_extras:
+        from production.pit_constituents import _read_market_file
+        extras: set[str] = set()
+        for market in cfg.universe_extras:
+            extras.update(_read_market_file(qlib_data_root, market))
+        members = sorted(set(members) | extras)
     return members, universe_name
 
 

@@ -30,19 +30,23 @@ interface Props {
   lastActualDate: string;
 }
 
-const ACTUAL_UP = '#26a69a';
-const ACTUAL_DN = '#ef5350';
-const PRED_BULL = (a: number) => `rgba(59,130,246,${a})`;
-const PRED_BEAR = (a: number) => `rgba(250,204,21,${a})`;
+// A-share convention: RED = up (涨), GREEN = down (跌). Inverted vs Western
+// TradingView default. Saturated values for better visibility on the
+// dark #0d1117 background.
+const ACTUAL_UP = '#ef4444';  // bright red (up)
+const ACTUAL_DN = '#22c55e';  // bright green (down)
+const PRED_BULL = (a: number) => `rgba(59,130,246,${a})`;   // blue (predicted bullish)
+const PRED_BEAR = (a: number) => `rgba(250,204,21,${a})`;   // amber (predicted bearish)
 const MA20_COLOR = '#3b82f6';
 const MA60_COLOR = '#fb923c';
-const VOL_UP = 'rgba(38,166,154,0.4)';
-const VOL_DN = 'rgba(239,83,80,0.4)';
+const VOL_UP = 'rgba(239,68,68,0.4)';   // red (up volume)
+const VOL_DN = 'rgba(34,197,94,0.4)';   // green (down volume)
 
-// Per-model overlay line colors (LGBM / ALSTM / TRA)
-const LGBM_COLOR = '#26a69a';
-const ALSTM_COLOR = '#3b82f6';
-const TRA_COLOR = '#a78bfa';
+// Per-model overlay line colors (LGBM / ALSTM / TRA) — kept distinct
+// from the red/green up/down semantic, since these are model identity.
+const LGBM_COLOR = '#fbbf24';   // amber (was green — conflicted with A-share down)
+const ALSTM_COLOR = '#3b82f6';  // blue
+const TRA_COLOR = '#a78bfa';    // purple
 
 const LGBM_COLS = ['lgbm_1d', 'lgbm_5d', 'lgbm_20d'];
 const ALSTM_COLS = ['alstm_1d', 'alstm_5d', 'alstm_20d'];
