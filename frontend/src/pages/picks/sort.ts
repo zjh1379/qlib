@@ -12,7 +12,10 @@ export type SortKey =
   | 'vol_ratio'
   | 'consensus'
   | 'score_avg'
-  | 'days_in_top';
+  | 'days_in_top'
+  | 'pred_1d'
+  | 'pred_5d'
+  | 'pred_20d';
 
 export type SortDir = 'asc' | 'desc';
 
@@ -21,7 +24,17 @@ export interface SortState {
   dir: SortDir;
 }
 
-export const DEFAULT_SORT: SortState = { key: 'rank', dir: 'asc' };
+export const DEFAULT_SORT: SortState = { key: 'pred_5d', dir: 'desc' };
+
+/** Extract sort value for a candidate. Handles horizon predictions
+ *  (pred_1d/5d/20d) which live inside item.horizons. */
+function getSortValue(item: Candidate, key: SortKey): number | string | null | undefined {
+  if (key === 'pred_1d' || key === 'pred_5d' || key === 'pred_20d') {
+    const h = key.replace('pred_', '') as '1d' | '5d' | '20d';
+    return item.horizons?.[h]?.pred_return ?? item.horizons?.[h]?.percentile ?? null;
+  }
+  return item[key as keyof Candidate] as number | string | null | undefined;
+}
 
 /** Stable, null-safe sort. Nulls go to the end regardless of direction. */
 export function applySort(items: Candidate[], sort: SortState): Candidate[] {
@@ -29,8 +42,8 @@ export function applySort(items: Candidate[], sort: SortState): Candidate[] {
   const sign = dir === 'asc' ? 1 : -1;
   // [...items] avoids mutating the input (which React/TanStack may hold by reference).
   return [...items].sort((a, b) => {
-    const av = a[key] as number | string | null | undefined;
-    const bv = b[key] as number | string | null | undefined;
+    const av = getSortValue(a, key);
+    const bv = getSortValue(b, key);
     const aNull = av === null || av === undefined;
     const bNull = bv === null || bv === undefined;
     if (aNull && bNull) return 0;

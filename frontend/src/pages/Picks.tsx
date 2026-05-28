@@ -8,12 +8,17 @@ import RecentlyViewed from '@/components/RecentlyViewed';
 import { FilterBar } from './picks/FilterBar';
 import { applyFilters } from './picks/filter';
 import { applySort, DEFAULT_SORT, nextSort, SortKey, SortState } from './picks/sort';
+import HorizonMiniBar from './picks/HorizonMiniBar';
+import StalenessBanner from './picks/StalenessBanner';
+import TopInfoRow from './picks/TopInfoRow';
 import type { FilterParams } from './picks/types';
 import { useFilterParams } from './picks/useFilterParams';
 
 import type { components } from '@/api/types.gen';
 
 type Candidate = components['schemas']['ScreenItem'];
+
+type HorizonId = '1d' | '5d' | '20d';
 
 // Fixed base params — the candidate pool is computed once per (recorder, view).
 // Filter & sort happen client-side, so we always fetch a generous pool.
@@ -43,14 +48,64 @@ export default function Picks() {
   // Client-side sort.
   const sorted = useMemo(() => applySort(filtered, sort), [filtered, sort]);
 
+  // Extract target dates from the first item that has horizons populated
+  const targetDates = useMemo(() => {
+    const out: Record<string, string> = {};
+    if (!data?.items) return out;
+    for (const it of data.items) {
+      const h = (it as Candidate).horizons;
+      if (h) {
+        for (const key of ['1d', '5d', '20d'] as const) {
+          if (h[key] && !out[key]) out[key] = h[key].target_date;
+        }
+      }
+      if (out['1d'] && out['5d'] && out['20d']) break;
+    }
+    return out;
+  }, [data?.items]);
+
+  // Max abs return per horizon for bar normalization
+  const maxAbsByHorizon = useMemo(() => {
+    const out: Record<HorizonId, number> = { '1d': 0, '5d': 0, '20d': 0 };
+    if (!data?.items) return out;
+    for (const it of data.items) {
+      const h = (it as Candidate).horizons;
+      if (!h) continue;
+      for (const key of ['1d', '5d', '20d'] as const) {
+        const r = h[key]?.pred_return;
+        if (r != null) out[key] = Math.max(out[key], Math.abs(r));
+      }
+    }
+    for (const key of ['1d', '5d', '20d'] as const) {
+      out[key] = Math.max(out[key], 0.01);
+    }
+    return out;
+  }, [data?.items]);
+
   return (
-    <div className="space-y-6 max-w-6xl">
+    <div className="space-y-6 max-w-7xl">
       <header>
         <h1 className="text-2xl font-semibold">选股工作台</h1>
         <p className="text-sm text-[#8b949e] mt-1">
           基于滚动重训集成模型的横截面打分排名 · 候选池服务器缓存 · 筛选与排序均在浏览器执行
         </p>
       </header>
+
+      {data && (
+        <StalenessBanner
+          staleDays={data.data_stale_days ?? 0}
+          asOfDate={data.as_of_date ?? ''}
+          dataLatestDate={data.data_latest_date ?? ''}
+        />
+      )}
+
+      {data && (
+        <TopInfoRow
+          asOfDate={data.as_of_date ?? data.latest_date}
+          dataLatestDate={data.data_latest_date ?? data.latest_date}
+          targetDates={targetDates}
+        />
+      )}
 
       <RecentlyViewed />
 
@@ -79,7 +134,12 @@ export default function Picks() {
           <EmptyState params={params} totalCandidates={data.items.length} />
         ) : data ? (
           <div className={cn('relative transition-opacity', isFetching ? 'opacity-60' : '')}>
-            <ResultsTable items={sorted} sort={sort} onSort={(k) => setSort(nextSort(sort, k))} />
+            <ResultsTable
+              items={sorted}
+              sort={sort}
+              onSort={(k) => setSort(nextSort(sort, k))}
+              maxAbsByHorizon={maxAbsByHorizon}
+            />
           </div>
         ) : null}
       </div>
@@ -100,9 +160,10 @@ interface ResultsTableProps {
   items: Candidate[];
   sort: SortState;
   onSort: (k: SortKey) => void;
+  maxAbsByHorizon: Record<HorizonId, number>;
 }
 
-function ResultsTable({ items, sort, onSort }: ResultsTableProps) {
+function ResultsTable({ items, sort, onSort, maxAbsByHorizon }: ResultsTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -111,13 +172,12 @@ function ResultsTable({ items, sort, onSort }: ResultsTableProps) {
             <SortableTh label="rank" sortKey="rank" sort={sort} onSort={onSort} />
             <SortableTh label="代码" sortKey="symbol" sort={sort} onSort={onSort} />
             <th className="py-2 pr-4">名称</th>
+            <SortableTh label="1 日" sortKey="pred_1d" sort={sort} onSort={onSort} />
+            <SortableTh label="5 日 (主)" sortKey="pred_5d" sort={sort} onSort={onSort} />
+            <SortableTh label="20 日" sortKey="pred_20d" sort={sort} onSort={onSort} />
             <SortableTh label="单价 ¥" sortKey="last_price" sort={sort} onSort={onSort} align="right" />
-            <th className="py-2 pr-4 text-right">100 股 ¥</th>
             <SortableTh label="涨跌5d" sortKey="pct_change_5d" sort={sort} onSort={onSort} align="right" />
-            <SortableTh label="振幅" sortKey="amplitude" sort={sort} onSort={onSort} align="right" />
-            <SortableTh label="量比" sortKey="vol_ratio" sort={sort} onSort={onSort} align="right" />
             <th className="py-2 pr-4">板块</th>
-            <SortableTh label="共识" sortKey="consensus" sort={sort} onSort={onSort} align="right" />
           </tr>
         </thead>
         <tbody>
@@ -130,25 +190,29 @@ function ResultsTable({ items, sort, onSort }: ResultsTableProps) {
               <td className="py-2 pr-4">
                 <Link to={`/charts/${item.symbol}`} className="hover:underline">{item.name}</Link>
               </td>
+              {(['1d', '5d', '20d'] as const).map((h) => (
+                <td key={h} className="py-2 pr-3">
+                  {item.horizons?.[h] ? (
+                    <HorizonMiniBar
+                      horizon={h}
+                      predReturn={item.horizons[h].pred_return ?? null}
+                      percentile={item.horizons[h].percentile}
+                      modelAgreement={item.horizons[h].model_agreement ?? null}
+                      maxAbsReturn={maxAbsByHorizon[h]}
+                      isPrimary={h === '5d'}
+                    />
+                  ) : (
+                    <span className="text-[#6e7681] text-xs">—</span>
+                  )}
+                </td>
+              ))}
               <td className="py-2 pr-4 text-right font-mono text-[#e6edf3]">
                 {item.last_price != null ? item.last_price.toFixed(2) : '—'}
-              </td>
-              <td className="py-2 pr-4 text-right font-mono text-[#8b949e]">
-                {item.last_price != null ? '¥' + (item.last_price * 100).toLocaleString('zh-CN', { maximumFractionDigits: 0 }) : '—'}
               </td>
               <td className={cn('py-2 pr-4 text-right font-mono', pctColorClass(item.pct_change_5d))}>
                 {item.pct_change_5d != null ? formatPct(item.pct_change_5d) : '—'}
               </td>
-              <td className="py-2 pr-4 text-right font-mono">
-                {item.amplitude != null ? (item.amplitude * 100).toFixed(2) + '%' : '—'}
-              </td>
-              <td className="py-2 pr-4 text-right font-mono">
-                {item.vol_ratio != null ? item.vol_ratio.toFixed(2) : '—'}
-              </td>
               <td className="py-2 pr-4 text-[#8b949e]">{labelBoard(item.board)}</td>
-              <td className={cn('py-2 pr-4 text-right font-mono', consensusColorClass(item.consensus ?? 0))}>
-                {(item.consensus ?? 0).toFixed(2)}
-              </td>
             </tr>
           ))}
         </tbody>
@@ -227,8 +291,3 @@ function labelBoard(b: string | null | undefined): string {
   }
 }
 
-function consensusColorClass(v: number): string {
-  if (v >= 0.78) return 'text-green-400';
-  if (v >= 0.44) return 'text-yellow-400';
-  return 'text-[#8b949e]';
-}

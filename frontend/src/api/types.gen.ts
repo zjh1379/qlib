@@ -427,6 +427,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/inference/active/peek": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Active Peek */
+        get: operations["active_peek_api_inference_active_peek_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inference/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inference Status */
+        get: operations["inference_status_api_inference_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inference/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job */
+        get: operations["get_job_api_inference_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inference/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Trigger */
+        post: operations["trigger_api_inference_run_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/internal/cache/invalidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invalidate
+         * @description Called by daily_inference subprocess after appending to recorder.
+         *     Restricted to localhost so external traffic can't flush the cache.
+         */
+        post: operations["invalidate_api_internal_cache_invalidate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduling/retrain": {
         parameters: {
             query?: never;
@@ -580,6 +669,15 @@ export interface components {
             active_models?: string[] | null;
             /** Items */
             items: components["schemas"]["ScreenItem"][];
+            /** As Of Date */
+            as_of_date?: string | null;
+            /** Data Latest Date */
+            data_latest_date?: string | null;
+            /**
+             * Data Stale Days
+             * @default 0
+             */
+            data_stale_days: number;
         };
         /** CandleBar */
         CandleBar: {
@@ -781,6 +879,63 @@ export interface components {
             total_unrealized_pnl?: number | null;
             /** As Of */
             as_of?: string | null;
+        };
+        /**
+         * HorizonPrediction
+         * @description Per-(stock, horizon) prediction packet.
+         *
+         *     target_date is the trading day this horizon predicts (latest_date +
+         *     1/5/20 trading days). pred_return is the calibrated expected return as
+         *     a decimal (e.g. 0.032 = +3.2%), or None when no calibration is loaded.
+         *     percentile is 0..100 with 100 = best. model_agreement is 0..1 fraction
+         *     of the 3 models that agree on direction (NaN-skip).
+         */
+        HorizonPrediction: {
+            /** Target Date */
+            target_date: string;
+            /** Pred Return */
+            pred_return?: number | null;
+            /** Percentile */
+            percentile: number;
+            /** Model Agreement */
+            model_agreement?: number | null;
+            /** Raw Scores */
+            raw_scores?: {
+                [key: string]: number;
+            };
+        };
+        /** InferenceJob */
+        InferenceJob: {
+            /** Job Id */
+            job_id: string;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** End Date */
+            end_date?: string | null;
+            /** Error */
+            error?: string | null;
+            /** New Rows */
+            new_rows?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** InferenceStatus */
+        InferenceStatus: {
+            /** Last Run At */
+            last_run_at?: string | null;
+            /** Last Success At */
+            last_success_at?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Is Running
+             * @default false
+             */
+            is_running: boolean;
         };
         /** InstrumentItem */
         InstrumentItem: {
@@ -1107,6 +1262,10 @@ export interface components {
             };
             /** Last Price */
             last_price?: number | null;
+            /** Horizons */
+            horizons?: {
+                [key: string]: components["schemas"]["HorizonPrediction"];
+            };
             /** Pct Change 1D */
             pct_change_1d?: number | null;
             /** Pct Change 3D */
@@ -1233,6 +1392,13 @@ export interface components {
             broker?: string | null;
             /** Notes */
             notes?: string | null;
+        };
+        /** TriggerResponse */
+        TriggerResponse: {
+            /** Status */
+            status: string;
+            /** Job Id */
+            job_id?: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -2015,6 +2181,128 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    active_peek_api_inference_active_peek_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceJob"] | null;
+                };
+            };
+        };
+    };
+    inference_status_api_inference_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceStatus"];
+                };
+            };
+        };
+    };
+    get_job_api_inference_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_api_inference_run_now_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    invalidate_api_internal_cache_invalidate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
