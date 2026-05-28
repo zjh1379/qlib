@@ -101,6 +101,13 @@ export function saveRecent(symbol: string) {
   const list = loadRecent().filter((s) => s !== symbol);
   list.unshift(symbol);
   localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 10)));
+  // Notify same-tab listeners (RecentlyViewed component) so they refresh
+  // without needing a route change. `storage` event doesn't fire same-tab.
+  try {
+    window.dispatchEvent(new Event('qlib-recent-updated'));
+  } catch {
+    /* SSR / tests */
+  }
 }
 
 export default function SymbolSearch({

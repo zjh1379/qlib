@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { useCandidates } from '@/models/hooks';
 import { cn } from '@/lib/utils';
 
+import RecentlyViewed from '@/components/RecentlyViewed';
 import { FilterBar } from './picks/FilterBar';
 import { applyFilters } from './picks/filter';
 import { applySort, DEFAULT_SORT, nextSort, SortKey, SortState } from './picks/sort';
@@ -50,6 +51,8 @@ export default function Picks() {
           基于滚动重训集成模型的横截面打分排名 · 候选池服务器缓存 · 筛选与排序均在浏览器执行
         </p>
       </header>
+
+      <RecentlyViewed />
 
       <FilterBar
         params={params}
