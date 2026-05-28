@@ -91,7 +91,12 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
   });
 
   const [showActual, setShowActual] = useState(true);
-  const [showPred, setShowPred] = useState(true);
+  // 预测 K 线 defaults to OFF — it's an overlay of model-predicted OHLC at
+  // the same dates as actual, so when both are visible the predicted bars
+  // occlude the actual ones. Users who want the model's view can toggle it
+  // on; the per-model LGBM/ALSTM/TRA line overlays below give a cleaner
+  // signal-without-occlusion view.
+  const [showPred, setShowPred] = useState(false);
   const [showMA20, setShowMA20] = useState(true);
   const [showMA60, setShowMA60] = useState(true);
   const [showVolume, setShowVolume] = useState(true);
@@ -351,7 +356,10 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
           />
           实际 K 线
         </label>
-        <label className="flex items-center gap-2 cursor-pointer">
+        <label
+          className="flex items-center gap-2 cursor-pointer"
+          title="模型预测的每日 K 线，叠加在实际 K 线之上。蓝色=看涨预测、黄色=看跌预测。叠加时会遮挡实际 K 线，建议只在想看预测细节时打开。"
+        >
           <input
             type="checkbox"
             checked={showPred}
@@ -359,6 +367,7 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
             aria-label="预测 K 线"
           />
           预测 K 线
+          <span className="text-[10px] text-[#6e7681]">(蓝涨/黄跌)</span>
         </label>
         <label className="flex items-center gap-2 cursor-pointer">
           <input
