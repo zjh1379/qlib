@@ -33,17 +33,15 @@ handler:
   # runtime by _build_multihead_dataset in train_alstm.py.
 
 learn_processors:
+  # CSRankNorm was added on 2026-05-28 hoping to match qlib's canonical
+  # ALSTM Alpha360 setup. EMPIRICAL RESULT on 4-week backfill
+  # (2026-05-01..05-22, 8800 samples, csi800): ALSTM 5d IC -0.041 and
+  # ALSTM 20d IC -0.027 — both turned negative, dragging ensemble IC
+  # from baseline +0.034 to -0.005. Reverting. Hypothesis: rank-norm
+  # MSE loss interacts badly with our open-to-open horizon labels
+  # (Ref($open,-N+1)/Ref($open,-1)-1) on our shorter training window
+  # (3-5y vs canonical 7y). Re-add only with paired evaluation.
   - class: DropnaLabel
-  # CSRankNorm on label is critical for ALSTM (qlib's canonical
-  # workflow_config_alstm_Alpha360.yaml line 24 uses it). Without it,
-  # MSE loss is biased toward high-volatility stocks and the model
-  # learns absolute returns rather than cross-sectional ordering —
-  # this is the dominant explanation for low ALSTM IC. Output preds
-  # are in rank-norm space which is fully compatible with rank_average
-  # ensembling (downstream stacker uses raw labels from D.features).
-  - class: CSRankNorm
-    kwargs:
-      fields_group: label
 
 infer_processors:
   - class: RobustZScoreNorm
