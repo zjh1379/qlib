@@ -1,6 +1,22 @@
 from pydantic import BaseModel, Field
 
 
+class HorizonPrediction(BaseModel):
+    """Per-(stock, horizon) prediction packet.
+
+    target_date is the trading day this horizon predicts (latest_date +
+    1/5/20 trading days). pred_return is the calibrated expected return as
+    a decimal (e.g. 0.032 = +3.2%), or None when no calibration is loaded.
+    percentile is 0..100 with 100 = best. model_agreement is 0..1 fraction
+    of the 3 models that agree on direction (NaN-skip).
+    """
+    target_date: str
+    pred_return: float | None = None
+    percentile: float
+    model_agreement: float | None = None
+    raw_scores: dict[str, float] = Field(default_factory=dict)
+
+
 class ScreenItem(BaseModel):
     rank: int
     symbol: str
@@ -12,6 +28,8 @@ class ScreenItem(BaseModel):
     consensus: float = 0.0
     base_scores: dict[str, float] = Field(default_factory=dict)
     last_price: float | None = None
+    # Per-horizon predictions (T9): {"1d": HP, "5d": HP, "20d": HP}
+    horizons: dict[str, HorizonPrediction] = Field(default_factory=dict)
 
     # Tier 1 screener metrics — exposed to UI for at-a-glance display
     # AND for client-side filtering/sorting (no backend re-fetch on filter change).
@@ -55,6 +73,11 @@ class CandidatesResponse(BaseModel):
     available_models: list[str] = Field(default_factory=list)
     active_models: list[str] | None = None
     items: list[ScreenItem]
+    # Multi-horizon UX (T9): which date the predictions are AS-OF, what the
+    # latest qlib bin data is, and how stale predictions are vs that data.
+    as_of_date: str | None = None
+    data_latest_date: str | None = None
+    data_stale_days: int = 0
 
 
 class PredictionPoint(BaseModel):
