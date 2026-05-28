@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json as _json
+import logging
 import re as _re
 import subprocess
 import sys as _sys
@@ -9,6 +10,8 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from app.core.exceptions import ConflictError, DependencyError, NotFoundError
 from app.core.qlib_adapter import (
@@ -288,6 +291,29 @@ def _wait_and_update(job_id: str, proc: subprocess.Popen, log_path: Path) -> Non
         _running_lock.release()
     except RuntimeError:
         pass
+    # On success: spawn daily inference so predictions use the latest data
+    if rc == 0:
+        _on_refresh_success(job_id)
+
+
+def _on_refresh_success(job_id: str) -> None:
+    """Triggered when a data refresh job completes successfully.
+
+    Spawns daily_inference subprocess so predictions update to use the
+    latest qlib bin data without waiting for the next weekly retrain.
+    Best-effort: failures here are logged but don't affect the refresh
+    job's result.
+    """
+    try:
+        from app.inference.service import trigger_inference
+        resp = trigger_inference(reason="data_refresh")
+        logger.info(
+            "refresh_success_triggered_inference refresh_job=%s "
+            "inference_job=%s status=%s",
+            job_id, getattr(resp, "job_id", None), getattr(resp, "status", None),
+        )
+    except Exception as exc:
+        logger.exception("refresh_callback_failed refresh_job=%s: %s", job_id, exc)
 
 
 def get_active_refresh_job() -> dict | None:
