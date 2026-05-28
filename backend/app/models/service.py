@@ -1,5 +1,9 @@
 import functools
+import logging
+from datetime import date as _date
+from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from app.core.config import Settings
@@ -11,7 +15,58 @@ from app.core.qlib_adapter import (
     init_qlib_once,
     load_pred,
 )
-from app.models.schemas import ScreenItem
+from app.models.schemas import HorizonPrediction, ScreenItem
+
+_log = logging.getLogger(__name__)
+
+# Cached calibration map loaded from production/cache/latest_calibration.pkl
+_CALIBRATION_CACHE: dict | None = None
+_H_TO_N = {"1d": 1, "5d": 5, "20d": 20}
+
+
+def _load_calibration() -> dict:
+    global _CALIBRATION_CACHE
+    if _CALIBRATION_CACHE is not None:
+        return _CALIBRATION_CACHE
+    try:
+        # Avoid circular import; sys.path already includes repo root
+        import sys
+        repo_root = Path(__file__).resolve().parents[3]
+        if str(repo_root) not in sys.path:
+            sys.path.append(str(repo_root))
+        from production.calibration import load_calibration
+        _CALIBRATION_CACHE = load_calibration(
+            repo_root / "production" / "cache" / "latest_calibration.pkl"
+        )
+    except Exception as exc:
+        _log.warning("calibration_load_failed: %s", exc)
+        _CALIBRATION_CACHE = {"maps": {}, "meta": {}}
+    return _CALIBRATION_CACHE
+
+
+def _get_qlib_latest_date() -> _date | None:
+    try:
+        from qlib.data import D
+        cal = D.calendar()
+        if len(cal) == 0:
+            return None
+        return pd.Timestamp(cal[-1]).date()
+    except Exception as exc:
+        _log.warning("qlib_calendar_load_failed: %s", exc)
+        return None
+
+
+def _next_n_trading_days(start: _date, n: int) -> _date:
+    """Returns the date n trading days after `start`."""
+    try:
+        from qlib.data import D
+        cal = D.calendar(start_time=str(start))
+        if len(cal) > n:
+            return pd.Timestamp(cal[n]).date()
+        # Past the calendar — extrapolate via business days
+        return (pd.Timestamp(cal[-1]) + pd.tseries.offsets.BDay(n - (len(cal) - 1))).date()
+    except Exception:
+        return (pd.Timestamp(start) + pd.tseries.offsets.BDay(n)).date()
 
 
 def _name_map() -> dict[str, str]:
@@ -258,13 +313,114 @@ def _candidates_cached(
             it.is_st = is_st_name(it.name)
 
     available_models = sorted(
-        c for c in df.columns if c not in ("score", "consensus")
+        c for c in df.columns
+        if c not in ("score", "consensus")
+        and not c.startswith("composite_")
+        and not c.startswith("expected_")
     )
+
+    # ===== Per-horizon enrichment + staleness ============================
+    cal = _load_calibration()
+    cal_maps = cal.get("maps", {})
+    qlib_latest = _get_qlib_latest_date()
+    latest_date = today.date() if hasattr(today, "date") else _date.fromisoformat(str(today)[:10])
+
+    # Build per-horizon series at latest_date ONCE (not per item)
+    horizon_data: dict[str, dict] = {}  # {horizon: {symbol: HorizonPrediction-shaped dict}}
+    target_dates_map: dict[str, str] = {}
+    try:
+        last_slice = df.xs(today, level="datetime")
+    except KeyError:
+        last_slice = None
+
+    if last_slice is not None and not last_slice.empty:
+        for h in ("1d", "5d", "20d"):
+            cols = [c for c in df.columns
+                    if c.endswith(f"_{h}")
+                    and not c.startswith("expected_")
+                    and not c.startswith("composite_")
+                    and c not in ("score", "consensus")]
+            if not cols:
+                continue
+            # Composite score at latest_date
+            sub = last_slice[cols]
+            ranks = sub.rank(ascending=False, method="min")
+            comp = -ranks.mean(axis=1, skipna=True)
+            n = int(comp.notna().sum())
+            if n == 0:
+                continue
+            comp_rank = comp.rank(ascending=False, method="min")
+            target = _next_n_trading_days(latest_date, _H_TO_N[h])
+            target_dates_map[h] = target.isoformat()
+
+            iso = cal_maps.get(h)
+            if iso is not None:
+                try:
+                    from production.calibration import apply_calibration
+                    pr = apply_calibration(comp, iso)
+                except Exception:
+                    pr = pd.Series(index=comp.index, dtype=float)
+            else:
+                pr = pd.Series(np.nan, index=comp.index)
+
+            # Build per-symbol dict
+            h_map: dict[str, dict] = {}
+            for sym in comp.index:
+                sym_score = comp.loc[sym]
+                if pd.isna(sym_score):
+                    continue
+                sym_rank = comp_rank.loc[sym]
+                percentile = float(100.0 * (1.0 - (sym_rank - 1) / n)) if n > 0 else 0.0
+                pred_return = pr.loc[sym]
+                pred_return = None if pd.isna(pred_return) else float(pred_return)
+                # raw_scores + agreement
+                raw: dict[str, float] = {}
+                for m in ("lgbm", "alstm", "tra"):
+                    col = f"{m}_{h}"
+                    if col in last_slice.columns:
+                        v = last_slice.loc[sym, col] if sym in last_slice.index else np.nan
+                        if pd.notna(v):
+                            raw[m] = float(v)
+                signs = [1 if v > 0 else (-1 if v < 0 else 0) for v in raw.values()]
+                agreement = float(abs(sum(signs)) / len(signs)) if signs else None
+                h_map[sym] = {
+                    "target_date": target.isoformat(),
+                    "pred_return": pred_return,
+                    "percentile": percentile,
+                    "model_agreement": agreement,
+                    "raw_scores": raw,
+                }
+            horizon_data[h] = h_map
+
+    # Attach horizons to each item (wrap each in HorizonPrediction so
+    # ScreenItem.model_dump() round-trips cleanly)
+    for it in items:
+        hd: dict[str, HorizonPrediction] = {}
+        for h, hmap in horizon_data.items():
+            if it.symbol in hmap:
+                hd[h] = HorizonPrediction(**hmap[it.symbol])
+        if hd:
+            it.horizons = hd
+
+    # Staleness
+    data_stale_days = 0
+    data_latest_str = latest_date.isoformat()
+    if qlib_latest and qlib_latest > latest_date:
+        try:
+            from qlib.data import D
+            cal_seg = D.calendar(start_time=str(latest_date), end_time=str(qlib_latest))
+            data_stale_days = max(0, len(cal_seg) - 1)
+        except Exception:
+            data_stale_days = (qlib_latest - latest_date).days
+        data_latest_str = qlib_latest.isoformat()
 
     return {
         "experiment": exp,
         "recorder_id": recorder_id,
-        "latest_date": str(today.date()),
+        "latest_date": data_latest_str,
+        "as_of_date": latest_date.isoformat(),
+        "data_latest_date": data_latest_str,
+        "data_stale_days": data_stale_days,
         "window_days": days,
         "universe_size": universe_size,
         "available_models": available_models,
@@ -274,7 +430,12 @@ def _candidates_cached(
 
 
 def invalidate_candidates_cache() -> int:
-    """Clear the lru_cache. Returns number of entries that were cleared."""
+    """Clear the lru_cache. Also drops the calibration cache so the next
+    candidates() call picks up a freshly-written latest_calibration.pkl.
+    Returns number of entries that were cleared.
+    """
+    global _CALIBRATION_CACHE
+    _CALIBRATION_CACHE = None
     info = _candidates_cached.cache_info()
     _candidates_cached.cache_clear()
     return info.currsize
