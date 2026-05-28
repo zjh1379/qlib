@@ -302,8 +302,23 @@ def get_csi300_with_names() -> list[dict]:
     return get_market_with_names("csi300")
 
 
+import re as _re
+
+# Internal point-in-time snapshots written per-week by
+# production/pit_constituents.py (e.g. "csi800_pit_2026-05-22"). These are
+# wired into qlib's instruments dir so the training pipeline can pin a
+# survivorship-bias-free universe, but they're not meaningful as a
+# user-facing universe choice — hide them from the data-source picker.
+_INTERNAL_INSTRUMENTS_PATTERN = _re.compile(r"^[a-z]+\d*_pit_\d{4}-\d{2}-\d{2}$", _re.IGNORECASE)
+
+
 def list_available_markets() -> list[dict]:
-    """Scan instruments/ dir for *.txt files. Return [{name, count, label}, ...]."""
+    """Scan instruments/ dir for *.txt files. Return [{name, count, label}, ...].
+
+    Filters out:
+      - `all.txt` — qlib's full-universe meta file
+      - `*_pit_YYYY-MM-DD.txt` — internal weekly PIT snapshots
+    """
     init_qlib_once()
     s = Settings()
     inst_dir = s.qlib_data_dir / "instruments"
@@ -322,6 +337,8 @@ def list_available_markets() -> list[dict]:
         name = txt.stem
         if name == "all":
             continue  # exclude the union meta file from user-facing list
+        if _INTERNAL_INSTRUMENTS_PATTERN.match(name):
+            continue  # internal PIT snapshot, not a user-selectable universe
         try:
             with txt.open("r", encoding="utf-8") as fh:
                 count = sum(1 for ln in fh if ln.strip())
