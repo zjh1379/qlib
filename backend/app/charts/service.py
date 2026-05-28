@@ -147,4 +147,41 @@ def get_chart(
                             )
             meta["calendar_end"] = str(calendar_end)
 
-    return ChartPayload(symbol=symbol, actual=actual, predicted=predicted, forecast=forecast, meta=meta)
+    # Build per-horizon future markers from the candidates response for this
+    # symbol. Reuses the cached candidates() call so the same horizon numbers
+    # appear in both the picks table and the chart, with no duplication.
+    horizon_markers: list = []
+    try:
+        from app.charts.schemas import HorizonMarker
+        from app.models.service import candidates as _candidates
+
+        if actual:
+            cands = _candidates(top=2000, days=1)
+            last_close = actual[-1].close
+            found = next(
+                (it for it in cands.get("items", []) if it.get("symbol") == symbol),
+                None,
+            )
+            if found and found.get("horizons") and last_close > 0:
+                for h, hp in found["horizons"].items():
+                    pred_ret = hp.get("pred_return")
+                    target_price = (
+                        last_close * (1 + pred_ret)
+                        if pred_ret is not None else last_close
+                    )
+                    horizon_markers.append(HorizonMarker(
+                        horizon=h,
+                        target_date=hp["target_date"],
+                        target_price=float(target_price),
+                        pred_return=pred_ret,
+                        percentile=hp.get("percentile", 0.0),
+                        model_agreement=hp.get("model_agreement"),
+                        raw_scores=hp.get("raw_scores", {}),
+                    ))
+    except Exception as exc:
+        meta["horizon_markers_error"] = str(exc)[:200]
+
+    return ChartPayload(
+        symbol=symbol, actual=actual, predicted=predicted, forecast=forecast,
+        horizon_markers=horizon_markers, meta=meta,
+    )
