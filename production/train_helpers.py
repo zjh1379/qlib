@@ -21,21 +21,34 @@ _log = logging.getLogger(__name__)
 
 
 def save_calibration_artifacts(model, dataset, handler_cfg, *, recorder=None) -> None:
-    """Save the 3 extra artifacts to the current mlflow recorder.
+    """Save the 4 extra artifacts to the current mlflow recorder.
 
     Must be called inside an active `R.start(...)` block (or pass an explicit
     `recorder=...`). The current mlflow recorder is resolved via
     `qlib.workflow.R.save_objects` when `recorder` is None.
 
+    Saves:
+      - trained_model      the model object itself, needed by daily_inference
+                           to run forward on new dates without retraining
+      - valid_pred.pkl     model predictions on the validation slice
+      - valid_label.pkl    realized labels on the validation slice
+      - handler_config.pkl init config so daily_inference can rebuild features
+
     Parameters
     ----------
     model : qlib model instance with .predict(dataset, segment=...)
     dataset : qlib DatasetH instance with segments={'train','valid','test'}
-    handler_cfg : dict with the handler init config (so daily_inference
-        can rebuild the handler on demand). Pass `None` to skip this save.
+    handler_cfg : dict with the handler init config. Pass None to skip.
     recorder : optional explicit recorder. If None, uses R.save_objects.
     """
     save_fn = _get_save_fn(recorder)
+
+    # ---- trained_model -----------------------------------------------------
+    # This is what daily_inference needs to run forward on new dates.
+    try:
+        save_fn(**{"trained_model": model})
+    except Exception as exc:
+        _log.warning("save_calibration_artifacts: trained_model failed: %s", exc)
 
     # ---- valid_pred.pkl --------------------------------------------------
     try:
