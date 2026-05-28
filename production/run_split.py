@@ -187,11 +187,12 @@ def _pool_from_recorders(end_date: date, cfg_path: str) -> Path:
 
 
 def _kill_zombie_python(min_mem_mb: int = 100) -> int:
-    """Best-effort: kill any python.exe consuming > min_mem_mb that's not
-    our parent (i.e. likely a leftover training process from a previous
-    crashed run). Returns count of killed processes.
+    """Best-effort: kill any python.exe that looks like a leftover training
+    process from a previous crashed run. Conservative match — only processes
+    whose command line contains 'rolling_train' or 'production.run_split'
+    (so we don't murder uvicorn, jupyter, etc).
 
-    Skipped silently on non-Windows.
+    Returns count of killed processes. Silent skip on non-Windows.
     """
     if not _sys.platform.startswith("win"):
         return 0
@@ -202,6 +203,9 @@ def _kill_zombie_python(min_mem_mb: int = 100) -> int:
     me_pid = subprocess.os.getpid()
     parent_pid = subprocess.os.getppid()
     killed = 0
+    # Whitelist of cmdline substrings we ARE willing to kill. Anything else
+    # (backend uvicorn, the user's jupyter, etc.) is left alone.
+    TARGET_TOKENS = ("rolling_train", "production.run_split", "incremental_refresh")
     for proc in psutil.process_iter(attrs=["pid", "name", "memory_info"]):
         try:
             if proc.info["name"] != "python.exe":
@@ -211,9 +215,16 @@ def _kill_zombie_python(min_mem_mb: int = 100) -> int:
             rss_mb = proc.info["memory_info"].rss / 1024 / 1024
             if rss_mb < min_mem_mb:
                 continue
+            # Now check the command line — only kill known-training procs.
+            try:
+                cmdline = " ".join(proc.cmdline())
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            if not any(tok in cmdline for tok in TARGET_TOKENS):
+                continue
             _log.warning(
-                "killing zombie pid=%d rss=%dMB",
-                proc.info["pid"], int(rss_mb),
+                "killing zombie pid=%d rss=%dMB cmdline=%s",
+                proc.info["pid"], int(rss_mb), cmdline[:120],
             )
             proc.kill()
             killed += 1
