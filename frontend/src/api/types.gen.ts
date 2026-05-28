@@ -710,6 +710,11 @@ export interface components {
              * @description Future-only predicted bars (dates beyond last actual)
              */
             forecast?: components["schemas"]["PredictionBar"][];
+            /**
+             * Horizon Markers
+             * @description Future markers for 1d/5d/20d horizons drawn on the K-line
+             */
+            horizon_markers?: components["schemas"]["HorizonMarker"][];
             /** Meta */
             meta?: {
                 [key: string]: unknown;
@@ -879,6 +884,31 @@ export interface components {
             total_unrealized_pnl?: number | null;
             /** As Of */
             as_of?: string | null;
+        };
+        /**
+         * HorizonMarker
+         * @description Per-horizon future prediction packet for a single symbol's chart.
+         *
+         *     target_price = last_actual_close * (1 + pred_return) when pred_return is
+         *     not None; otherwise equal to last_actual_close (rendered as flat marker).
+         */
+        HorizonMarker: {
+            /** Horizon */
+            horizon: string;
+            /** Target Date */
+            target_date: string;
+            /** Target Price */
+            target_price: number;
+            /** Pred Return */
+            pred_return?: number | null;
+            /** Percentile */
+            percentile: number;
+            /** Model Agreement */
+            model_agreement?: number | null;
+            /** Raw Scores */
+            raw_scores?: {
+                [key: string]: number;
+            };
         };
         /**
          * HorizonPrediction

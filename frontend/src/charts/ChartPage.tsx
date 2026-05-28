@@ -63,6 +63,9 @@ export default function ChartPage() {
       actual={data.actual}
       predicted={data.predicted}
       forecast={data.forecast ?? []}
+      horizonMarkers={(data as { horizon_markers?: unknown[] }).horizon_markers as
+        | undefined
+        | Parameters<typeof PredictionChart>[0]['horizonMarkers']}
       lastActualDate={(data.meta as { last_actual_date?: string }).last_actual_date ?? ''}
     />
   );

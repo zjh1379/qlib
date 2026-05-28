@@ -22,12 +22,23 @@ export interface PredictionBar {
   score: number;
 }
 
+export interface HorizonMarker {
+  horizon: string;          // "1d" | "5d" | "20d"
+  target_date: string;
+  target_price: number;
+  pred_return: number | null;
+  percentile: number;
+  model_agreement: number | null;
+  raw_scores: Record<string, number>;
+}
+
 interface Props {
   symbol: string;
   actual: CandleBar[];
   predicted: PredictionBar[];
   forecast: PredictionBar[];
   lastActualDate: string;
+  horizonMarkers?: HorizonMarker[];
 }
 
 // A-share convention: RED = up (涨), GREEN = down (跌). Inverted vs Western
@@ -76,7 +87,7 @@ function sma(values: number[], window: number): (number | null)[] {
   return out;
 }
 
-export default function PredictionChart({ symbol, actual, predicted, forecast, lastActualDate }: Props) {
+export default function PredictionChart({ symbol, actual, predicted, forecast, lastActualDate, horizonMarkers }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const actualSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -84,11 +95,13 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
   const ma20SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ma60SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const futureLineRef = useRef<ISeriesApi<'Line'> | null>(null);
   const overlaySeriesRef = useRef<Record<OverlayKey, ISeriesApi<'Line'> | null>>({
     lgbm: null,
     alstm: null,
     tra: null,
   });
+  const [showFuture, setShowFuture] = useState(true);
 
   const [showActual, setShowActual] = useState(true);
   // 预测 K 线 defaults to OFF — it's an overlay of model-predicted OHLC at
@@ -256,6 +269,18 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
       title: 'TRA',
     });
 
+    // Future prediction line: dashed gray, connects last actual close to
+    // the 3 horizon markers (1d/5d/20d). Lives on the main price scale so
+    // its values are in ¥ (not arbitrary score units).
+    futureLineRef.current = chart.addLineSeries({
+      color: '#9ca3af',
+      lineWidth: 2,
+      lineStyle: 2,  // dashed
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: '未来预测',
+    });
+
     // Reserve bottom 15% for volume, keep candles in upper 80%.
     chart.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.85, bottom: 0 },
@@ -278,6 +303,7 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
       ma20SeriesRef.current = null;
       ma60SeriesRef.current = null;
       volumeSeriesRef.current = null;
+      futureLineRef.current = null;
       overlaySeriesRef.current = { lgbm: null, alstm: null, tra: null };
     };
   }, []);
@@ -286,19 +312,57 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
   useEffect(() => {
     actualSeriesRef.current?.setData(actual);
     chartRef.current?.timeScale().fitContent();
-    // Marker on last actual day pointing right (future starts here)
-    if (actual.length) {
-      actualSeriesRef.current?.setMarkers?.([
-        {
-          time: lastActualDate,
-          position: 'aboveBar',
-          color: '#ff9800',
-          shape: 'arrowDown',
-          text: '→ 未来',
-        },
-      ]);
-    }
-  }, [actual, lastActualDate]);
+  }, [actual]);
+
+  // Sync future prediction line + per-horizon markers on the actual series.
+  // Drawing markers on the actual candle series places them above the K-line
+  // at the right edge (future trading days); the dashed line connects the
+  // last actual close to the predicted target prices.
+  useEffect(() => {
+    if (!actualSeriesRef.current || !futureLineRef.current) return;
+    if (!actual.length) return;
+
+    const lastClose = actual[actual.length - 1].close;
+    const sorted = [...(horizonMarkers ?? [])].sort((a, b) =>
+      a.target_date.localeCompare(b.target_date),
+    );
+
+    // Dashed line: last close -> each marker's target_price
+    const lineData: { time: Time; value: number }[] = [
+      { time: lastActualDate as Time, value: lastClose },
+      ...sorted.map((m) => ({ time: m.target_date as Time, value: m.target_price })),
+    ];
+    futureLineRef.current.setData(showFuture && sorted.length > 0 ? lineData : []);
+    futureLineRef.current.applyOptions({ visible: showFuture });
+
+    // Markers on actual series
+    const baseMarker = {
+      time: lastActualDate,
+      position: 'aboveBar' as const,
+      color: '#ff9800',
+      shape: 'arrowDown' as const,
+      text: '→ 未来',
+    };
+    const futureMarkers = showFuture
+      ? sorted.map((m) => {
+          const ret = m.pred_return;
+          const isUp = ret == null ? false : ret >= 0;
+          const sizeByH: Record<string, number> = { '1d': 1, '5d': 1.5, '20d': 2 };
+          const label = ret != null
+            ? `${m.horizon}: ${ret >= 0 ? '+' : ''}${(ret * 100).toFixed(1)}%`
+            : `${m.horizon}`;
+          return {
+            time: m.target_date,
+            position: 'inBar' as const,
+            color: ret == null ? '#9ca3af' : (isUp ? '#ef4444' : '#22c55e'),
+            shape: 'circle' as const,
+            size: sizeByH[m.horizon] ?? 1,
+            text: label,
+          };
+        })
+      : [];
+    actualSeriesRef.current.setMarkers?.([baseMarker, ...futureMarkers]);
+  }, [actual, lastActualDate, horizonMarkers, showFuture]);
 
   // Sync predicted data + opacity
   useEffect(() => {
@@ -355,6 +419,19 @@ export default function PredictionChart({ symbol, actual, predicted, forecast, l
             aria-label="实际 K 线"
           />
           实际 K 线
+        </label>
+        <label
+          className="flex items-center gap-2 cursor-pointer"
+          title="未来 1/5/20 个交易日的模型预测目标价。虚线 = 从最新收盘价连接到目标点。红 = 看涨、绿 = 看跌、灰 = 无校准。"
+        >
+          <input
+            type="checkbox"
+            checked={showFuture}
+            onChange={e => setShowFuture(e.target.checked)}
+            aria-label="未来预测"
+          />
+          🎯 未来预测
+          <span className="text-[10px] text-[#6e7681]">(虚线)</span>
         </label>
         <label
           className="flex items-center gap-2 cursor-pointer"
