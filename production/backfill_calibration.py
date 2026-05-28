@@ -100,10 +100,12 @@ def _load_calibration_data_from_recorders(end_date: date) -> tuple[pd.DataFrame,
                     pred = rec.load_object("valid_pred.pkl")
                     use_valid = True
                 except Exception:
-                    pred = rec.load_object("pred.pkl")
+                    # Pre-Task-3 recorders save the per-horizon test prediction
+                    # as pred_<horizon>.pkl (recorder is already horizon-scoped).
+                    pred = rec.load_object(f"pred_{h}.pkl")
                     use_valid = False
-                    log.warning("recorder_lacks_valid_pred falling back to pred.pkl %s",
-                                target)
+                    log.warning("recorder_lacks_valid_pred falling back to pred_%s.pkl %s",
+                                h, target)
             except Exception as exc:
                 log.warning("load_failed %s: %s", target, exc)
                 continue
