@@ -15,6 +15,7 @@ from app.core.qlib_adapter import init_qlib_once
 from app.data.router import instruments_router as data_instruments_router
 from app.data.router import router as data_router
 from app.evaluation.router import router as evaluation_router
+from app.inference.router import router as inference_router, internal_router as inference_internal_router
 from app.models.router import router as models_router
 from app.ops.router import router as ops_router
 from app.portfolio.router import router as portfolio_router
@@ -82,6 +83,8 @@ def create_app() -> FastAPI:
     app.include_router(portfolio_router, prefix="/api/portfolio", tags=["portfolio"])
     app.include_router(models_router, prefix="/api/models", tags=["models"])
     app.include_router(evaluation_router, prefix="/api/evaluation", tags=["evaluation"])
+    app.include_router(inference_router)
+    app.include_router(inference_internal_router)
     app.include_router(scheduling_router, prefix="/api/scheduling", tags=["scheduling"])
 
     # Static serving of the built frontend (created in T18; tolerated if missing)
