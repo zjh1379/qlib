@@ -18,6 +18,14 @@ def list_recorders():
     return service.list_recorders_with_summary()
 
 
+@router.get("/active/peek")
+def active_peek():
+    """Return list of currently-evaluating recorder_ids. Empty list when
+    nothing is running. Frontend ActiveJobsBadge polls this so the chip
+    persists across page navigation."""
+    return service.get_active_evaluations()
+
+
 @router.post("/run", response_model=EvalResult)
 def run_evaluation(payload: EvalRunRequest):
     """Trigger evaluation for a recorder. Cached; pass force_refresh=true to recompute."""

@@ -74,6 +74,20 @@ export const api = {
         '/api/data/refresh/active/peek',
       );
     },
+    retrainActive: () =>
+      request<{
+        job_id: string;
+        kind: 'cron' | 'manual';
+        status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+        queued_at: string | null;
+        started_at: string | null;
+        finished_at: string | null;
+        error: string | null;
+      } | null>('/api/scheduling/retrain/jobs/active/peek'),
+    evalActive: () =>
+      request<Array<{ recorder_id: string; started_at: string }>>(
+        '/api/evaluation/active/peek',
+      ),
     markets: () => {
       type R = paths['/api/data/markets']['get']['responses']['200']['content']['application/json'];
       return request<R>('/api/data/markets');

@@ -179,6 +179,14 @@ _REGIME_SEGMENTS: list[tuple[str, str, str]] = [
 _CACHE_SEEN: set[str] = set()
 _CACHE_RESULTS: dict[str, EvalResult] = {}
 
+# Recorder IDs currently being evaluated (in-flight evaluate_recorder calls).
+# Lets the UI show "computing…" per-row in the recorder list + a global
+# 'evaluating' badge that survives page navigation. Keyed by recorder_id;
+# value is the started_at ISO timestamp.
+import threading as _threading
+_INFLIGHT: dict[str, str] = {}
+_INFLIGHT_LOCK = _threading.Lock()
+
 
 def evaluate_recorder(
     recorder_id: str,
@@ -195,10 +203,37 @@ def evaluate_recorder(
         _evaluate_cached.cache_clear()
         _CACHE_SEEN.clear()
         _CACHE_RESULTS.clear()
-    result = _evaluate_cached(recorder_id, top_k, cost_bps)
-    _CACHE_SEEN.add(recorder_id)
-    _CACHE_RESULTS[recorder_id] = result
-    return result
+    # Track in-flight evaluations so the UI can show "computing…" across
+    # page navigations. The lru_cache below means re-entry for the same
+    # (recorder_id, top_k, cost_bps) returns instantly from the cache,
+    # so the in-flight window is just the first call.
+    from datetime import datetime, timezone
+    started_at = datetime.now(timezone.utc).isoformat()
+    with _INFLIGHT_LOCK:
+        _INFLIGHT[recorder_id] = started_at
+    try:
+        result = _evaluate_cached(recorder_id, top_k, cost_bps)
+        _CACHE_SEEN.add(recorder_id)
+        _CACHE_RESULTS[recorder_id] = result
+        return result
+    finally:
+        with _INFLIGHT_LOCK:
+            # Only pop if our timestamp is still the active one (a
+            # concurrent force_refresh might have re-entered with a newer
+            # one — leave that one alone).
+            if _INFLIGHT.get(recorder_id) == started_at:
+                _INFLIGHT.pop(recorder_id, None)
+
+
+def get_active_evaluations() -> list[dict]:
+    """Return list of currently-evaluating recorder_ids with their
+    started_at timestamps. UI's ActiveJobsBadge polls this so the
+    'evaluating…' chip stays visible across page navigations."""
+    with _INFLIGHT_LOCK:
+        return [
+            {"recorder_id": rid, "started_at": ts}
+            for rid, ts in _INFLIGHT.items()
+        ]
 
 
 @functools.lru_cache(maxsize=32)

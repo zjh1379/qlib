@@ -344,6 +344,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/evaluation/active/peek": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Active Peek
+         * @description Return list of currently-evaluating recorder_ids. Empty list when
+         *     nothing is running. Frontend ActiveJobsBadge polls this so the chip
+         *     persists across page navigation.
+         */
+        get: operations["active_peek_api_evaluation_active_peek_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/evaluation/run": {
         parameters: {
             query?: never;
@@ -434,6 +456,47 @@ export interface paths {
         put?: never;
         /** Run Now */
         post: operations["run_now_api_scheduling_retrain_run_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scheduling/retrain/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrain Job Status
+         * @description Return per-retrain-job snapshot (pending/running/done/failed).
+         */
+        get: operations["retrain_job_status_api_scheduling_retrain_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scheduling/retrain/jobs/active/peek": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrain Active Peek
+         * @description Return the most recent retrain job (running or finished). Used by
+         *     the global ActiveJobsBadge so progress survives page navigation.
+         */
+        get: operations["retrain_active_peek_api_scheduling_retrain_jobs_active_peek_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1836,6 +1899,26 @@ export interface operations {
             };
         };
     };
+    active_peek_api_evaluation_active_peek_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     run_evaluation_api_evaluation_run_post: {
         parameters: {
             query?: never;
@@ -2016,6 +2099,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retrain_job_status_api_scheduling_retrain_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retrain_active_peek_api_scheduling_retrain_jobs_active_peek_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

@@ -110,6 +110,29 @@ class SchedulerManager:
         # race where two parallel run_now calls both pass the is_running check
         # before either has acquired the lock.
         self._pending_count = 0
+        # Per-job tracking so the UI can recover progress after page
+        # navigation. {job_id: {status, started_at, finished_at, kind}}.
+        # status ∈ {pending, running, done, failed}. kind ∈ {cron, manual}.
+        # In-memory only — survives the FastAPI process but not a restart;
+        # acceptable because retrains last <4h and we redeploy < daily.
+        self._jobs: dict[str, dict] = {}
+        self._active_job_id: str | None = None
+
+    # === Job tracking API (read-only; used by HTTP routes) ===
+
+    def get_job_status(self, job_id: str) -> dict | None:
+        """Return per-job snapshot or None."""
+        return self._jobs.get(job_id)
+
+    def get_active_job(self) -> dict | None:
+        """Return the most recent retrain job (running or finished). Lets
+        the frontend recover progress after a page navigation. Returns
+        None if no retrain has ever been launched this process."""
+        if self._active_job_id and self._active_job_id in self._jobs:
+            return self._jobs[self._active_job_id]
+        if not self._jobs:
+            return None
+        return max(self._jobs.values(), key=lambda e: e.get("started_at") or "")
 
     async def start(self, session: AsyncSession) -> None:
         schedule = await self._read_row(session)
@@ -203,31 +226,87 @@ class SchedulerManager:
         # _gated_job_fn starts executing).
         self._pending_count += 1
         try:
+            job_id = f"{self.JOB_ID}_manual_{now.timestamp():.0f}"
+            # Pre-register so /jobs/active/peek can return it even before
+            # _gated_job_fn flips it to "running".
+            self._jobs[job_id] = {
+                "job_id": job_id,
+                "kind": "manual",
+                "status": "pending",
+                "started_at": None,
+                "finished_at": None,
+                "queued_at": datetime.now(tz=_CST).isoformat(),
+                "error": None,
+            }
+            self._active_job_id = job_id
             job = self._scheduler.add_job(
                 self._gated_job_fn,
                 trigger=None,
-                id=f"{self.JOB_ID}_manual_{now.timestamp():.0f}",
+                id=job_id,
+                kwargs={"_tracked_job_id": job_id},
             )
         except Exception:
             self._pending_count -= 1
+            self._jobs.pop(job_id, None)
+            self._active_job_id = None
             raise
         _log.info("run_now_scheduled", job_id=job.id)
         return job.id
 
-    async def _gated_job_fn(self) -> None:
+    async def _gated_job_fn(self, _tracked_job_id: str | None = None) -> None:
         """Job wrapper that drops the call if another one is in-flight.
 
         Decrements _pending_count in `finally` so manual run_now invocations
         balance out. Cron-triggered fires do not increment the counter (the
         cron job is installed once and fires periodically), so the guarded
         decrement below is a no-op in that path.
+
+        `_tracked_job_id` is set by run_now() so we can update the per-job
+        status dict on transitions. Cron fires pass None → still create a
+        new entry (kind=cron) on first fire so the UI sees scheduled runs
+        with the same status surface as manual run-now jobs.
         """
+        # If cron fired, mint an ad-hoc tracking entry now (the cron job_id
+        # in APScheduler is reused across firings; we want one tracking
+        # entry per firing).
+        if _tracked_job_id is None:
+            _tracked_job_id = f"{self.JOB_ID}_cron_{datetime.now(tz=_CST).timestamp():.0f}"
+            self._jobs[_tracked_job_id] = {
+                "job_id": _tracked_job_id,
+                "kind": "cron",
+                "status": "pending",
+                "started_at": None,
+                "finished_at": None,
+                "queued_at": datetime.now(tz=_CST).isoformat(),
+                "error": None,
+            }
+            self._active_job_id = _tracked_job_id
+
+        entry = self._jobs.get(_tracked_job_id)
         try:
             if self._running_lock.locked():
-                _log.warning("retrain_job_skipped_already_running")
+                _log.warning("retrain_job_skipped_already_running", job_id=_tracked_job_id)
+                if entry is not None:
+                    entry["status"] = "skipped"
+                    entry["finished_at"] = datetime.now(tz=_CST).isoformat()
                 return
             async with self._running_lock:
-                await self._raw_job_fn()
+                if entry is not None:
+                    entry["status"] = "running"
+                    entry["started_at"] = datetime.now(tz=_CST).isoformat()
+                try:
+                    await self._raw_job_fn()
+                    if entry is not None:
+                        entry["status"] = "done"
+                except Exception as exc:
+                    if entry is not None:
+                        entry["status"] = "failed"
+                        entry["error"] = str(exc)
+                    _log.exception("retrain_subprocess_raised", job_id=_tracked_job_id)
+                    raise
+                finally:
+                    if entry is not None:
+                        entry["finished_at"] = datetime.now(tz=_CST).isoformat()
         finally:
             if self._pending_count > 0:
                 self._pending_count -= 1

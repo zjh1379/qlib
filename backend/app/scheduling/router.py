@@ -61,3 +61,20 @@ async def run_now(
         return RunNowResponse(status="rejected", reason=str(exc))
     except AlreadyRunning as exc:
         return RunNowResponse(status="rejected", reason=str(exc))
+
+
+@router.get("/retrain/jobs/{job_id}")
+def retrain_job_status(job_id: str):
+    """Return per-retrain-job snapshot (pending/running/done/failed)."""
+    s = get_manager().get_job_status(job_id)
+    if s is None:
+        # 404-style — frontend treats as cleared/expired.
+        return None
+    return s
+
+
+@router.get("/retrain/jobs/active/peek")
+def retrain_active_peek():
+    """Return the most recent retrain job (running or finished). Used by
+    the global ActiveJobsBadge so progress survives page navigation."""
+    return get_manager().get_active_job()

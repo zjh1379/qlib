@@ -1,6 +1,7 @@
 import { Link, Outlet } from 'react-router-dom';
 import ActiveJobsBadge from '@/components/ActiveJobsBadge';
 import SymbolSearch from '@/components/SymbolSearch';
+import { Toaster } from '@/jobs/toast';
 import { cn } from '@/lib/utils';
 
 export default function Layout() {
@@ -27,6 +28,9 @@ export default function Layout() {
       <main className="flex-1 p-6">
         <Outlet />
       </main>
+      {/* Global toast container — survives route changes so a mutation
+          that fails after the user navigated away still surfaces. */}
+      <Toaster />
     </div>
   );
 }
