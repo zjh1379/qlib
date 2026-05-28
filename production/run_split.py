@@ -183,7 +183,79 @@ def _pool_from_recorders(end_date: date, cfg_path: str) -> Path:
     out_path = REPO_ROOT / "examples" / "mlruns" / f"pred_{end_str}.pkl"
     write_pred_pkl(base, out_path)
     _log.info("pool_wrote path=%s rows=%d cols=%s", out_path, len(base), list(base.columns))
+
+    # === Refit per-horizon calibration on the valid slices of contributing
+    # recorders. Stored in production/cache/latest_calibration.pkl for
+    # daily_inference + backend to apply. Fail-soft.
+    _refit_calibration(recs, end_str)
+
     return out_path
+
+
+def _refit_calibration(recs, end_str: str) -> None:
+    """Pull valid_pred.pkl + valid_label.pkl from each <model>_<horizon>_<end>
+    recorder, fit a fresh isotonic regression per horizon, save to
+    production/cache/latest_calibration.pkl.
+    """
+    try:
+        from datetime import datetime as _dt
+        from production.calibration import fit_calibration, save_calibration
+
+        valid_pred_cols: dict[str, "pd.Series"] = {}
+        valid_label_cols: dict[str, "pd.Series"] = {}
+        for rec in recs:
+            run_name = _recorder_name(rec)
+            for mid in ("lgbm", "alstm", "tra"):
+                for h in ("1d", "5d", "20d"):
+                    target = f"{mid}_{h}_{end_str}"
+                    if run_name != target:
+                        continue
+                    col = f"{mid}_{h}"
+                    try:
+                        vp = rec.load_object("valid_pred.pkl")
+                        if isinstance(vp, pd.DataFrame):
+                            vp = vp["score"] if "score" in vp.columns else vp.iloc[:, 0]
+                        valid_pred_cols[col] = vp.rename(col)
+                    except Exception:
+                        # No artifact -> calibration just won't include this col
+                        pass
+                    if f"label_{h}" not in valid_label_cols:
+                        try:
+                            vl = rec.load_object("valid_label.pkl")
+                            if isinstance(vl, pd.DataFrame):
+                                vl = vl.iloc[:, 0]
+                            valid_label_cols[f"label_{h}"] = vl.rename(f"label_{h}")
+                        except Exception:
+                            pass
+
+        if valid_pred_cols and valid_label_cols:
+            vp_df = pd.concat(list(valid_pred_cols.values()), axis=1).sort_index()
+            vl_df = pd.concat(list(valid_label_cols.values()), axis=1).sort_index()
+            cal = fit_calibration(vp_df, vl_df)
+            cache_path = REPO_ROOT / "production" / "cache" / "latest_calibration.pkl"
+            save_calibration(cal, cache_path, meta={
+                "trained_at": end_str,
+                "saved_at": _dt.utcnow().isoformat(),
+                "n_rows": int(len(vp_df)),
+            })
+            _log.info("calibration_refit horizons=%s -> %s",
+                      list(cal.keys()), cache_path)
+        else:
+            _log.warning("calibration_skip no valid_pred/label artifacts in recorders "
+                         "(rerun after Task 3 lands)")
+    except Exception as exc:
+        _log.warning("calibration_refit_failed: %s", exc)
+
+
+def _recorder_name(rec) -> str:
+    info = rec.info if hasattr(rec, "info") else {}
+    name = info.get("name") if isinstance(info, dict) else getattr(rec, "name", "")
+    if name:
+        return name
+    try:
+        return rec.client.get_run(rec.id).data.tags.get("mlflow.runName", "")
+    except Exception:
+        return ""
 
 
 def _kill_zombie_python(min_mem_mb: int = 100) -> int:
