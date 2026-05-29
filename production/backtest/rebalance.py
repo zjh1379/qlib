@@ -29,3 +29,15 @@ class Daily(RebalancePolicy):
 
     def target_weights(self, scores: pd.Series, current: pd.Series) -> pd.Series:
         return _equal_top_k(scores, self.top_k)
+
+
+class FixedPeriod(RebalancePolicy):
+    def __init__(self, top_k: int = 30, period: int = 5):
+        self.top_k = top_k
+        self.period = max(1, period)
+
+    def should_rebalance(self, step: int) -> bool:
+        return step % self.period == 0
+
+    def target_weights(self, scores: pd.Series, current: pd.Series) -> pd.Series:
+        return _equal_top_k(scores, self.top_k)
