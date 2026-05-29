@@ -62,9 +62,29 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 DEFAULT_MODELS = ("lgbm", "alstm", "tra")
 
 
-def _train_one_model(end_date: date, model_id: str, config: str) -> int:
+def _train_one_model(
+    end_date: date,
+    model_id: str,
+    config: str,
+    *,
+    max_rss_gb: float = 10.0,
+    max_commit_pct: float = 85.0,
+) -> int:
     """Launch rolling_train as a child process with only the named model
-    enabled and pooling disabled. Returns the subprocess exit code."""
+    enabled and pooling disabled. Returns the subprocess exit code.
+
+    Memory watchdog (CRITICAL — added 2026-05-29 after Event 2004 audit
+    showed single python.exe peaking at 17.2 GB virtual memory, which
+    collapsed Windows commit charge and caused a hard system freeze):
+
+    - max_rss_gb: kill the training subprocess if its RSS exceeds this
+      threshold (default 10 GB ≈ 1/3 of system RAM). This prevents one
+      runaway process from monopolising commit and freezing the whole OS.
+
+    - max_commit_pct: also poll system-wide swap+RAM usage; if total commit
+      exceeds this percent (default 85%), kill the heaviest training
+      subprocess to release pressure before pagefile exhausts.
+    """
     cmd = [
         sys.executable,
         "-m",
@@ -78,15 +98,71 @@ def _train_one_model(end_date: date, model_id: str, config: str) -> int:
         model_id,
         "--skip-pool",
     ]
-    _log.info("subprocess_start model=%s cmd=%s", model_id, " ".join(cmd))
+    _log.info(
+        "subprocess_start model=%s max_rss=%.1fGB max_commit=%.0f%% cmd=%s",
+        model_id, max_rss_gb, max_commit_pct, " ".join(cmd),
+    )
     t0 = time.time()
-    proc = subprocess.run(cmd, cwd=str(REPO_ROOT))
+
+    proc = subprocess.Popen(cmd, cwd=str(REPO_ROOT))
+
+    killed_reason: str | None = None
+    try:
+        import psutil
+    except Exception:
+        psutil = None  # type: ignore[assignment]
+
+    while True:
+        try:
+            rc = proc.wait(timeout=10)
+            break
+        except subprocess.TimeoutExpired:
+            if psutil is None:
+                continue
+            try:
+                p = psutil.Process(proc.pid)
+                rss_gb = p.memory_info().rss / 2**30
+                # Sum children too (rolling_train spawns its own data jobs)
+                for ch in p.children(recursive=True):
+                    try:
+                        rss_gb += ch.memory_info().rss / 2**30
+                    except Exception:
+                        pass
+                vm = psutil.virtual_memory()
+                sw = psutil.swap_memory()
+                total_commit = vm.used + sw.used
+                commit_limit = vm.total + sw.total
+                commit_pct = 100.0 * total_commit / commit_limit if commit_limit else 0
+                if rss_gb > max_rss_gb:
+                    killed_reason = f"per-process RSS {rss_gb:.1f}GB exceeded {max_rss_gb}GB"
+                elif commit_pct > max_commit_pct:
+                    killed_reason = f"system commit {commit_pct:.0f}% exceeded {max_commit_pct}%"
+                if killed_reason:
+                    _log.error(
+                        "memory_watchdog_killing model=%s pid=%d %s",
+                        model_id, proc.pid, killed_reason,
+                    )
+                    for ch in p.children(recursive=True):
+                        try:
+                            ch.kill()
+                        except Exception:
+                            pass
+                    p.kill()
+                    rc = proc.wait(timeout=15)
+                    break
+            except psutil.NoSuchProcess:
+                # Process already exited; loop will catch it next iteration
+                continue
+            except Exception as exc:
+                _log.debug("watchdog poll error: %s", exc)
+
     dt = time.time() - t0
     _log.info(
-        "subprocess_end model=%s rc=%d elapsed=%.1fs",
-        model_id, proc.returncode, dt,
+        "subprocess_end model=%s rc=%d elapsed=%.1fs%s",
+        model_id, rc, dt,
+        f" KILLED({killed_reason})" if killed_reason else "",
     )
-    return proc.returncode
+    return rc
 
 
 def _pool_from_recorders(end_date: date, cfg_path: str) -> Path:

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/api/client';
 
@@ -14,45 +15,60 @@ export interface ActiveJob {
 }
 
 /**
- * Polls all backend job-tracking endpoints (data refresh, retrain, evaluation)
- * and returns a unified list of active or recently-finished jobs.
+ * Polls all backend job-tracking endpoints and returns a unified list.
  *
- * Each endpoint has its own /active/peek route returning the most recent
- * non-terminal (or just-terminal) job; this hook fans out and merges them.
- *
- * Used by <ActiveJobsBadge /> in Layout so the user can see progress
- * regardless of which page they're on. 5s polling — enough granularity
- * for ~30s eval calls / ~3 min refresh / 1.5h retrain.
+ * Adaptive polling (added 2026-05-29 after memory audit): when no job is
+ * active, slow polling to 30s per endpoint instead of 3-5s. With 4
+ * endpoints × 5s that was ~50 req/min just on idle; now ~8 req/min idle.
+ * As soon as ANY endpoint reports a running job, all polls flip to 3s
+ * for fast progress feedback. Reduces backend RSS pressure from constant
+ * candidates / qlib calls.
  */
 export function useActiveJobs(): ActiveJob[] {
+  const [hasActive, setHasActive] = useState(false);
+  const fastMs = 3_000;
+  const slowMs = 30_000;
+  const interval = hasActive ? fastMs : slowMs;
+
   const { data: refresh } = useQuery({
     queryKey: ['jobs', 'refresh', 'active'],
     queryFn: () => api.data.refreshActive(),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: interval / 2,
+    refetchInterval: interval,
     refetchIntervalInBackground: true,
   });
   const { data: retrain } = useQuery({
     queryKey: ['jobs', 'retrain', 'active'],
     queryFn: () => api.data.retrainActive(),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: interval / 2,
+    refetchInterval: interval,
     refetchIntervalInBackground: true,
   });
   const { data: evals } = useQuery({
     queryKey: ['jobs', 'evaluation', 'active'],
     queryFn: () => api.data.evalActive(),
-    staleTime: 5_000,
-    refetchInterval: 5_000,
+    staleTime: interval / 2,
+    refetchInterval: interval,
     refetchIntervalInBackground: true,
   });
   const { data: inference } = useQuery({
     queryKey: ['jobs', 'inference', 'active'],
     queryFn: () => api.inference.active(),
-    staleTime: 3_000,
-    refetchInterval: 3_000,
+    staleTime: interval / 2,
+    refetchInterval: interval,
     refetchIntervalInBackground: true,
   });
+
+  // Watch for any running job and bump polling to fast.
+  useEffect(() => {
+    const running = (
+      (refresh?.status === 'running') ||
+      (retrain?.status === 'pending' || retrain?.status === 'running') ||
+      (Array.isArray(evals) && evals.length > 0) ||
+      (inference?.status === 'running')
+    );
+    if (running !== hasActive) setHasActive(!!running);
+  }, [refresh, retrain, evals, inference, hasActive]);
 
   const out: ActiveJob[] = [];
 

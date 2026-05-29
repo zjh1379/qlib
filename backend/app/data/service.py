@@ -36,12 +36,24 @@ from app.data.schemas import (
 
 _VALID_SYMBOL_RE = _re.compile(r"^(SH|SZ)\d{6}$")
 
-# Module-level state for refresh jobs
-_refresh_jobs: dict[str, dict[str, Any]] = {}
+# Module-level state for refresh jobs. OrderedDict + FIFO eviction so a
+# long-running backend doesn't accumulate refresh-job records forever
+# (fix-1, see Event 2004 root-cause audit 2026-05-29).
+from collections import OrderedDict as _OD
+_MAX_REFRESH_JOBS = 50
+_refresh_jobs: "_OD[str, dict[str, Any]]" = _OD()
 _running_lock = threading.Lock()
 # Track which job currently holds the running slot
 _running_job_id: str | None = None
 _running_state_lock = threading.Lock()
+
+
+def _remember_refresh_job(job_id: str, entry: dict[str, Any]) -> None:
+    _refresh_jobs[job_id] = entry
+    _refresh_jobs.move_to_end(job_id)
+    while len(_refresh_jobs) > _MAX_REFRESH_JOBS:
+        old_id, _old = _refresh_jobs.popitem(last=False)
+        logger.debug("evicted_old_refresh_job %s", old_id)
 
 
 def _calendar_day_file() -> Path:
@@ -370,7 +382,7 @@ def start_refresh() -> RefreshResponse:
             cwd=str(root),
         )
         with _running_state_lock:
-            _refresh_jobs[job_id] = {
+            _remember_refresh_job(job_id, {
                 "job_id": job_id,
                 "pid": proc.pid,
                 "started_at": started_at,
@@ -379,7 +391,7 @@ def start_refresh() -> RefreshResponse:
                 "log_path": str(log_path),
                 "_proc": proc,
                 "_log_fh": log_fh,
-            }
+            })
             _running_job_id = job_id
 
         # Spawn a daemon thread to wait for the process; it will release the lock.

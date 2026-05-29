@@ -51,6 +51,23 @@ export const api = {
       type R = paths['/api/ops/health']['get']['responses']['200']['content']['application/json'];
       return request<R>('/api/ops/health');
     },
+    memory: () =>
+      request<{
+        system: {
+          ram_total_gb: number; ram_used_gb: number; ram_available_gb: number;
+          pagefile_total_gb: number; pagefile_used_gb: number;
+          commit_used_gb: number; commit_total_gb: number; commit_pct: number;
+          warning: boolean; critical: boolean;
+        };
+        project_processes: Array<{
+          pid: number; name: string; rss_mb: number; vms_mb: number;
+          is_self: boolean; cmdline?: string;
+        }>;
+        other_processes_top10: Array<{
+          pid: number; name: string; rss_mb: number; vms_mb: number;
+        }>;
+        in_memory_state: Record<string, number>;
+      }>('/api/ops/memory'),
   },
   data: {
     status: () => {

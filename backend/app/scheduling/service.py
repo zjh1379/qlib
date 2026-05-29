@@ -111,12 +111,20 @@ class SchedulerManager:
         # before either has acquired the lock.
         self._pending_count = 0
         # Per-job tracking so the UI can recover progress after page
-        # navigation. {job_id: {status, started_at, finished_at, kind}}.
+        # navigation. OrderedDict + FIFO eviction at MAX so a long-running
+        # backend doesn't accumulate job entries forever (fix-1 audit
+        # 2026-05-29 — small contributor to commit charge growth).
         # status ∈ {pending, running, done, failed}. kind ∈ {cron, manual}.
-        # In-memory only — survives the FastAPI process but not a restart;
-        # acceptable because retrains last <4h and we redeploy < daily.
-        self._jobs: dict[str, dict] = {}
+        from collections import OrderedDict as _OD
+        self._MAX_JOBS = 50
+        self._jobs: "_OD[str, dict]" = _OD()
         self._active_job_id: str | None = None
+
+    def _remember_job(self, job_id: str, entry: dict) -> None:
+        self._jobs[job_id] = entry
+        self._jobs.move_to_end(job_id)
+        while len(self._jobs) > self._MAX_JOBS:
+            self._jobs.popitem(last=False)
 
     # === Job tracking API (read-only; used by HTTP routes) ===
 
@@ -229,7 +237,7 @@ class SchedulerManager:
             job_id = f"{self.JOB_ID}_manual_{now.timestamp():.0f}"
             # Pre-register so /jobs/active/peek can return it even before
             # _gated_job_fn flips it to "running".
-            self._jobs[job_id] = {
+            self._remember_job(job_id, {
                 "job_id": job_id,
                 "kind": "manual",
                 "status": "pending",
@@ -237,7 +245,7 @@ class SchedulerManager:
                 "finished_at": None,
                 "queued_at": datetime.now(tz=_CST).isoformat(),
                 "error": None,
-            }
+            })
             self._active_job_id = job_id
             job = self._scheduler.add_job(
                 self._gated_job_fn,
@@ -271,7 +279,7 @@ class SchedulerManager:
         # entry per firing).
         if _tracked_job_id is None:
             _tracked_job_id = f"{self.JOB_ID}_cron_{datetime.now(tz=_CST).timestamp():.0f}"
-            self._jobs[_tracked_job_id] = {
+            self._remember_job(_tracked_job_id, {
                 "job_id": _tracked_job_id,
                 "kind": "cron",
                 "status": "pending",
@@ -279,7 +287,7 @@ class SchedulerManager:
                 "finished_at": None,
                 "queued_at": datetime.now(tz=_CST).isoformat(),
                 "error": None,
-            }
+            })
             self._active_job_id = _tracked_job_id
 
         entry = self._jobs.get(_tracked_job_id)
