@@ -1,0 +1,45 @@
+import pytest
+import numpy as np
+import pandas as pd
+from production.backtest.metrics_net import net_metrics, net_regime
+
+
+def _mk_daily(n=252, mean=0.001, std=0.01, turnover=0.1, cost=0.0001, seed=0):
+    rng = np.random.default_rng(seed)
+    dates = pd.bdate_range("2024-01-02", periods=n)
+    net = rng.normal(mean, std, n)
+    gross = net + cost
+    return pd.DataFrame(
+        {"gross": gross, "cost": cost, "net": net,
+         "turnover": turnover, "nav": (1 + pd.Series(net, index=dates)).cumprod() * 1e5},
+        index=pd.Index(dates, name="datetime"),
+    )
+
+
+def test_net_metrics_keys_and_types():
+    out = net_metrics(_mk_daily())
+    for k in ["net_cagr", "gross_cagr", "net_ir", "max_drawdown",
+              "avg_turnover", "cost_drag_annual", "win_rate", "n_days"]:
+        assert k in out
+    assert out["n_days"] == 252
+    assert out["avg_turnover"] == pytest.approx(0.1, rel=1e-9)
+
+
+def test_positive_drift_has_positive_cagr():
+    out = net_metrics(_mk_daily(mean=0.002, std=0.005, seed=1))
+    assert out["net_cagr"] > 0
+    assert out["net_ir"] > 0
+
+
+def test_empty_daily_returns_nan():
+    out = net_metrics(pd.DataFrame(columns=["gross", "cost", "net", "turnover", "nav"]))
+    assert out["n_days"] == 0
+    assert np.isnan(out["net_ir"])
+
+
+def test_net_regime_splits():
+    daily = _mk_daily(n=200)
+    segs = net_regime(daily, [("2024-01-01", "2024-03-31"), ("2024-04-01", "2024-12-31")])
+    assert len(segs) == 2
+    for _, m in segs.items():
+        assert "net_ir" in m
