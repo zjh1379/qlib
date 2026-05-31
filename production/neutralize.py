@@ -15,7 +15,7 @@ def neutralize(scores: pd.Series, sector: pd.Series | None = None,
         x = g.copy()
         inst = x.index.get_level_values("instrument")
         if sector is not None:
-            sec = pd.Series(sector.reindex(inst).values, index=x.index)
+            sec = pd.Series(sector.reindex(inst).values, index=x.index).fillna("UNKNOWN")
             grp_mean = x.groupby(sec.values).transform("mean")
             x = x - pd.Series(grp_mean.values, index=x.index)
         if size is not None:

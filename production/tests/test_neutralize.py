@@ -28,3 +28,14 @@ def test_returns_same_index():
     out = neutralize(s, size=pd.Series({"A": 1.0, "B": 2.0, "C": 3.0}))
     assert out.index.equals(s.index)
     assert out.name == s.name
+
+
+def test_missing_sector_treated_as_unknown_not_dropped():
+    dates = [pd.Timestamp("2024-01-02")]
+    stocks = ["A", "B", "C"]
+    s = _scores(dates, stocks, [1.0, 3.0, 10.0])
+    sector = pd.Series({"A": "x", "B": "x"})  # C missing from the map
+    out = neutralize(s, sector=sector)
+    day = out.xs(dates[0], level="datetime")
+    assert day.notna().all()                       # C not dropped to NaN
+    assert day["C"] == pytest.approx(0.0, abs=1e-9)  # C alone in UNKNOWN group -> demeaned to 0
