@@ -57,3 +57,19 @@ def test_fold_complete_false_when_missing_one():
         _FakeExp(names), date(2026, 1, 2),
         ("lgbm", "alstm", "tra"), ("1d", "5d", "20d"),
     ) is False
+
+
+# ---------------------------------------------------------------------------
+# T4: build_backfill_cmd — orchestrator command builder
+# ---------------------------------------------------------------------------
+
+from production.backfill_longwindow import build_backfill_cmd  # noqa: E402
+
+
+def test_build_backfill_cmd_lgbm():
+    cmd = build_backfill_cmd("lgbm", "2021-01-01", "2026-01-01", step_weeks=26,
+                             test_weeks=26, train_years=3)
+    s = " ".join(cmd)
+    assert "production.rolling_train" in s and "backfill" in s
+    assert "--only-models lgbm" in s
+    assert "--step-weeks 26" in s and "--test-weeks 26" in s and "--train-years 3" in s
