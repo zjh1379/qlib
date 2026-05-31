@@ -442,7 +442,7 @@ git commit -m "feat(backfill): long-window orchestrator (LGBM then neural, resum
 
 ### Task 5: 跑 LGBM 长回填 + 长窗口基线评估
 - [ ] **预检**：确认 pagefile ≥ 64GB；新开终端起看门狗：`F:/Tools/Anaconda/envs/qlib/python.exe -m production.safety_watchdog`
-- [ ] **冒烟（1 折）**：`... -m production.rolling_train run-once --end-date 2021-07-02 --only-models lgbm --test-weeks 26 --train-years 3` —— 确认产出 `lgbm_*_2021-07-02` recorder 且无异常。
+- [ ] **冒烟（1 折）**：`... -m production.rolling_train backfill --start 2021-07-02 --end 2021-07-02 --only-models lgbm --step-weeks 26 --test-weeks 26 --train-years 3` —— 确认产出 `lgbm_*_2021-07-02` recorder 且无异常。（覆盖参数只在 `backfill` 子命令上，不在 `run-once` 上）
 - [ ] **LGBM 全量（后台，~2h）**：`F:/Tools/Anaconda/envs/qlib/python.exe -m production.backfill_longwindow --start 2021-01-01 --end 2026-01-01 --skip-neural > logs/backfill_lgbm.log 2>&1`
 - [ ] **拼 OOF**：`... -m production.backfill_pool --start 2021-01-01 --end 2026-01-01 --models lgbm --out production/reports/oof_lgbm_2021_2026.pkl`
 - [ ] **长窗口评估**（复用 P0/P1）：
