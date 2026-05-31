@@ -26,3 +26,34 @@ def test_annual_step():
     out = backfill_fold_end_dates(date(2021, 1, 1), date(2026, 1, 1), step_weeks=52)
     assert (out[1] - out[0]).days == 52 * 7
     assert 4 <= len(out) <= 6             # ~5 folds
+
+
+# ---------------------------------------------------------------------------
+# T2: fold_recorders_complete — skip-existing predicate
+# ---------------------------------------------------------------------------
+
+from production.rolling_train import fold_recorders_complete  # noqa: E402
+
+
+class _FakeExp:
+    def __init__(self, names):
+        self._names = names
+
+    def list_recorders(self):
+        return [type("R", (), {"info": {"name": n}})() for n in self._names]
+
+
+def test_fold_complete_true_when_all_present():
+    names = [f"{m}_{h}_2026-01-02" for m in ("lgbm", "alstm", "tra") for h in ("1d", "5d", "20d")]
+    assert fold_recorders_complete(
+        _FakeExp(names), date(2026, 1, 2),
+        ("lgbm", "alstm", "tra"), ("1d", "5d", "20d"),
+    ) is True
+
+
+def test_fold_complete_false_when_missing_one():
+    names = [f"lgbm_{h}_2026-01-02" for h in ("1d", "5d", "20d")]  # only lgbm
+    assert fold_recorders_complete(
+        _FakeExp(names), date(2026, 1, 2),
+        ("lgbm", "alstm", "tra"), ("1d", "5d", "20d"),
+    ) is False
