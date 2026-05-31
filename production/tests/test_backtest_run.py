@@ -29,3 +29,13 @@ def test_build_report_has_metrics_and_params():
     assert rep["metrics"]["n_days"] == 2
     # JSON-serializable
     json.dumps(rep)
+
+
+def test_load_sector_map(tmp_path):
+    p = tmp_path / "ind.parquet"
+    pd.DataFrame({"instrument": ["SH600000", "SZ000001"],
+                  "industry": ["银行", "银行"]}).to_parquet(p, index=False)
+    from production.backtest.run import load_sector_map
+    m = load_sector_map(str(p))
+    assert m["SH600000"] == "银行"
+    assert m["SZ000001"] == "银行"

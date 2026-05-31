@@ -21,6 +21,12 @@ from .metrics_net import net_metrics, net_regime
 from .rebalance import Daily, FixedPeriod, Banded
 
 
+def load_sector_map(path: str) -> pd.Series:
+    """Load instrument->industry Series from a parquet with columns [instrument, industry]."""
+    df = pd.read_parquet(path)
+    return pd.Series(df["industry"].values, index=df["instrument"].values)
+
+
 def extract_score_series(pred, score_col: str = "score") -> pd.Series:
     if isinstance(pred, pd.DataFrame):
         col = score_col if score_col in pred.columns else pred.columns[0]
@@ -66,10 +72,19 @@ def main() -> int:
     ap.add_argument("--profile", default="small", choices=["small", "pro"])
     ap.add_argument("--config", default="production/configs/rolling_ensemble.yaml")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--neutralize", action="store_true",
+                    help="apply sector neutralization to scores before backtest")
+    ap.add_argument("--industry-map", default="production/cache/industry_map.parquet")
     args = ap.parse_args()
 
     pred = pd.read_pickle(args.pred_file)
     scores = extract_score_series(pred, args.score_col).dropna()
+
+    if args.neutralize:
+        from production.neutralize import neutralize as _neutralize
+        sector = load_sector_map(args.industry_map)
+        scores = _neutralize(scores, sector=sector)
+
     instruments = sorted(scores.index.get_level_values("instrument").unique())
     dates = scores.index.get_level_values("datetime")
     start, end = str(dates.min().date()), str(dates.max().date())
