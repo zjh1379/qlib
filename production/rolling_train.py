@@ -43,8 +43,8 @@ if _PURELIB and _PURELIB not in _sys.path[:1]:
 import argparse
 import logging
 import sys
-from dataclasses import dataclass
-from datetime import date
+from dataclasses import dataclass, replace
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +60,24 @@ _log = logging.getLogger("rolling_train")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+DEFAULT_MODELS = ("lgbm", "alstm", "tra")
+
+
+def backfill_fold_end_dates(start: date, end: date, step_weeks: int = 1) -> list[date]:
+    """Friday-anchored fold end-dates from start..end, stepping step_weeks each time.
+
+    Finds the first Friday on or after `start`, then yields dates at
+    `step_weeks * 7` day intervals until `end` is exceeded.  Pure function
+    (no I/O) — safe to unit-test without qlib.
+    """
+    days_to_friday = (4 - start.weekday()) % 7
+    cursor = start + timedelta(days=days_to_friday)
+    out: list[date] = []
+    while cursor <= end:
+        out.append(cursor)
+        cursor += timedelta(days=step_weeks * 7)
+    return out
 
 
 @dataclass
@@ -253,14 +271,98 @@ def train_lgbm_horizon(
     return pred
 
 
-def run_once(cfg: RollingConfig, end_date: date, skip_pool: bool = False) -> Path | None:
+# ---------------------------------------------------------------------------
+# T2 helpers — resumable backfill skip predicate
+# ---------------------------------------------------------------------------
+
+def _rec_name(r) -> str:
+    """Extract the recorder name from a qlib recorder object (or a fake in tests)."""
+    info = getattr(r, "info", {})
+    if isinstance(info, dict) and info.get("name"):
+        return info["name"]
+    return getattr(r, "name", "") or ""
+
+
+def fold_recorders_complete(exp, end_date: date, models, horizons) -> bool:
+    """Return True if every <model>_<horizon>_<end_date> recorder already exists.
+
+    Works with live qlib experiment objects and with the lightweight fake used
+    in unit tests (any object with a `.list_recorders()` method returning an
+    iterable of objects that have `.info["name"]` or `.name`).
+    """
+    recs = exp.list_recorders()
+    # qlib returns a dict {id: recorder}; tests return a list — handle both.
+    if isinstance(recs, dict):
+        recs = recs.values()
+    have = {_rec_name(r) for r in recs}
+    es = end_date.isoformat()
+    needed = {f"{m}_{h}_{es}" for m in models for h in horizons}
+    return needed.issubset(have)
+
+
+def run_once(
+    cfg: RollingConfig,
+    end_date: date,
+    skip_pool: bool = False,
+    *,
+    test_weeks_override: int | None = None,
+    train_years_override: int | None = None,
+    skip_if_exists: bool = False,
+) -> Path | None:
     """Run one weekly iteration. Returns the path to the written pred.pkl,
     or None when `skip_pool=True` (caller is responsible for pooling).
 
     `skip_pool` is used by `production/run_split.py` to split a memory-heavy
     end-to-end run into per-model subprocesses: each subprocess trains its
     models (writes to mlflow recorders) and exits, releasing all memory.
+
+    New keyword-only params (all optional, backward-compatible):
+      test_weeks_override:  override HorizonConfig.test_weeks for all horizons
+                            (e.g. 26 for semi-annual OOF windows).
+      train_years_override: override HorizonConfig.train_years for all horizons
+                            (e.g. 3 to limit lookback when data only starts 2018).
+      skip_if_exists:       if True and all recorders for this fold already exist
+                            in the experiment, skip training and return the
+                            existing pred pickle (if present) or fall through to
+                            retrain if the pickle is missing.
     """
+    # Apply horizon overrides (creates a shadow cfg — does not mutate the original).
+    if test_weeks_override is not None or train_years_override is not None:
+        new_horizons = [
+            replace(
+                h,
+                test_weeks=test_weeks_override if test_weeks_override is not None else h.test_weeks,
+                train_years=train_years_override if train_years_override is not None else h.train_years,
+            )
+            for h in cfg.horizons
+        ]
+        cfg = replace(cfg, horizons=new_horizons)
+
+    # Resumable backfill: skip fold when all recorders already exist.
+    if skip_if_exists:
+        try:
+            from qlib.workflow import R
+            init_qlib(cfg)
+            exp = R.get_exp(experiment_name=cfg.experiment_name)
+            enabled_models = tuple(
+                s["id"] for s in cfg.model_specs if s["enabled"]
+            )
+            if fold_recorders_complete(
+                exp, end_date,
+                enabled_models,
+                tuple(h.name for h in cfg.horizons),
+            ):
+                pred_path = REPO_ROOT / "examples" / "mlruns" / f"pred_{end_date}.pkl"
+                if pred_path.exists():
+                    _log.info("skip_existing_fold end_date=%s pred_path=%s", end_date, pred_path)
+                    return pred_path
+                _log.info(
+                    "recorders_exist_but_pred_missing end_date=%s — retraining",
+                    end_date,
+                )
+        except Exception as exc:
+            _log.warning("skip_if_exists_check_failed end_date=%s error=%s — proceeding", end_date, exc)
+
     init_qlib(cfg)
     members, universe_name = build_universe(cfg, end_date)
     _log.info(
@@ -408,34 +510,57 @@ def run_once(cfg: RollingConfig, end_date: date, skip_pool: bool = False) -> Pat
     return pred_path
 
 
-def run_backfill(cfg: RollingConfig, start: date, end: date) -> list[Path]:
+def run_backfill(
+    cfg: RollingConfig,
+    start: date,
+    end: date,
+    *,
+    step_weeks: int = 1,
+    test_weeks_override: int | None = None,
+    train_years_override: int | None = None,
+    skip_if_exists: bool = True,
+) -> list[Path]:
     """Loop run_once over every Friday in [start, end]. Writes one
     pred_<friday>.pkl per iteration. Returns list of written paths.
 
     Each iteration is independent — if one fails, we log and continue.
+
+    New keyword-only params (all optional, backward-compatible):
+      step_weeks:           advance the cursor by this many weeks per fold
+                            (default 1 = weekly, unchanged from prior behavior).
+      test_weeks_override:  forwarded to run_once (long test window support).
+      train_years_override: forwarded to run_once (limits lookback; useful when
+                            data only starts 2018 and we need 2021+ OOF).
+      skip_if_exists:       forwarded to run_once; default True so backfill
+                            runs are resumable by default.
     """
-    from datetime import timedelta
-    # Find the first Friday on or after start
-    days_to_friday = (4 - start.weekday()) % 7
-    cursor = start + timedelta(days=days_to_friday)
+    fold_dates = backfill_fold_end_dates(start, end, step_weeks)
+    total = len(fold_dates)
     paths: list[Path] = []
     failures: list[tuple[date, str]] = []
-    week_count = (end - cursor).days // 7 + 1
-    _log.info("backfill_start cursor=%s end=%s estimated_weeks=%d", cursor, end, week_count)
-    iteration = 0
-    while cursor <= end:
-        iteration += 1
-        _log.info("backfill_week iteration=%d/%d end_date=%s", iteration, week_count, cursor)
+    _log.info(
+        "backfill_start start=%s end=%s step_weeks=%d total_folds=%d",
+        start, end, step_weeks, total,
+    )
+    for iteration, cursor in enumerate(fold_dates, 1):
+        _log.info("backfill_fold iteration=%d/%d end_date=%s", iteration, total, cursor)
         try:
-            path = run_once(cfg, cursor)
-            paths.append(path)
-            _log.info("backfill_week_ok iteration=%d end_date=%s rows_written=ok", iteration, cursor)
+            path = run_once(
+                cfg, cursor,
+                test_weeks_override=test_weeks_override,
+                train_years_override=train_years_override,
+                skip_if_exists=skip_if_exists,
+            )
+            if path is not None:
+                paths.append(path)
+            _log.info("backfill_fold_ok iteration=%d end_date=%s", iteration, cursor)
         except Exception as exc:
-            _log.warning("backfill_week_failed iteration=%d end_date=%s error=%s",
-                         iteration, cursor, str(exc))
+            _log.warning(
+                "backfill_fold_failed iteration=%d end_date=%s error=%s",
+                iteration, cursor, str(exc),
+            )
             failures.append((cursor, str(exc)))
-        cursor += timedelta(days=7)
-    _log.info("backfill_done weeks_ok=%d weeks_failed=%d", len(paths), len(failures))
+    _log.info("backfill_done folds_ok=%d folds_failed=%d", len(paths), len(failures))
     if failures:
         for d, e in failures:
             _log.warning("backfill_failure_summary date=%s error=%s", d, e[:200])
@@ -475,6 +600,41 @@ def main() -> None:
     p_back.add_argument("--start", required=True, help="YYYY-MM-DD inclusive")
     p_back.add_argument("--end", required=True, help="YYYY-MM-DD inclusive")
     p_back.add_argument("--config", default="production/configs/rolling_ensemble.yaml")
+    p_back.add_argument(
+        "--step-weeks",
+        type=int,
+        default=1,
+        help=(
+            "Advance the fold cursor by this many weeks per iteration "
+            "(default 1 = weekly). Use 26 for semi-annual OOF, 52 for annual."
+        ),
+    )
+    p_back.add_argument(
+        "--test-weeks",
+        type=int,
+        default=None,
+        help=(
+            "Override HorizonConfig.test_weeks for all horizons. "
+            "Set equal to --step-weeks for non-overlapping OOF windows."
+        ),
+    )
+    p_back.add_argument(
+        "--train-years",
+        type=int,
+        default=None,
+        help=(
+            "Override HorizonConfig.train_years for all horizons. "
+            "Use 3 when qlib data only starts 2018 and you want 2021+ eval."
+        ),
+    )
+    p_back.add_argument(
+        "--only-models",
+        default=None,
+        help=(
+            "Comma-separated subset of model ids (lgbm,alstm,tra) to train. "
+            "Other models in cfg are disabled for this invocation."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -495,8 +655,22 @@ def main() -> None:
             print("OK: training done, pool skipped")
     elif args.cmd == "backfill":
         cfg = load_config(REPO_ROOT / args.config)
-        paths = run_backfill(cfg, date.fromisoformat(args.start), date.fromisoformat(args.end))
-        print(f"OK: backfilled {len(paths)} weeks")
+        # Filter cfg.model_specs to the requested subset (if --only-models given).
+        if args.only_models:
+            wanted = {m.strip() for m in args.only_models.split(",") if m.strip()}
+            for spec in cfg.model_specs:
+                if spec["id"] not in wanted:
+                    spec["enabled"] = False
+            _log.info("backfill_only_models=%s", sorted(wanted))
+        paths = run_backfill(
+            cfg,
+            date.fromisoformat(args.start),
+            date.fromisoformat(args.end),
+            step_weeks=args.step_weeks,
+            test_weeks_override=args.test_weeks,
+            train_years_override=args.train_years,
+        )
+        print(f"OK: backfilled {len(paths)} folds")
         for p in paths:
             print(f"  {p}")
     else:
