@@ -3,6 +3,15 @@
 (datetime,instrument)->score series for long-window backtesting."""
 from __future__ import annotations
 
+# Force the installed qlib (site-packages) ahead of the uncompiled ./qlib
+# source tree when run as `python -m production.backfill_pool` from the repo
+# root (same guard as rolling_train.py / backtest/data.py / backfill_calibration.py).
+import sys as _sys
+import sysconfig as _sysconfig
+_PURELIB = _sysconfig.get_paths().get("purelib")
+if _PURELIB and _PURELIB not in _sys.path[:1]:
+    _sys.path.insert(0, _PURELIB)
+
 import re
 from datetime import date
 from pathlib import Path
