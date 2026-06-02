@@ -47,3 +47,42 @@ def test_iterates_only_dates_with_fwd_ret():
     fwd = _series({(dates[0], "A"): 0.01, (dates[1], "A"): 0.02})
     res = run_backtest(scores, fwd, Daily(top_k=1), CostModel(), capital=100_000.0)
     assert len(res["daily"]) == 2  # last date dropped
+
+
+def test_constant_exposure_scales_gross_linearly():
+    dates = [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")]
+    scores = _series({(dates[0], "A"): 1.0, (dates[1], "A"): 1.0})
+    fwd = _series({(dates[0], "A"): 0.01, (dates[1], "A"): 0.02})
+    full = run_backtest(scores, fwd, Daily(top_k=1), CostModel(), 1e5)["daily"]
+    exp = pd.Series(0.5, index=pd.Index(dates, name="datetime"))
+    half = run_backtest(scores, fwd, Daily(top_k=1), CostModel(), 1e5, exposure=exp)["daily"]
+    # second day holds same name -> no cost; gross should be exactly half
+    assert half.iloc[1]["gross"] == pytest.approx(0.5 * full.iloc[1]["gross"], rel=1e-9)
+
+
+def test_zero_exposure_no_gross():
+    dates = [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")]
+    scores = _series({(dates[0], "A"): 1.0, (dates[1], "A"): 1.0})
+    fwd = _series({(dates[0], "A"): 0.05, (dates[1], "A"): 0.05})
+    exp = pd.Series(0.0, index=pd.Index(dates, name="datetime"))
+    res = run_backtest(scores, fwd, Daily(top_k=1), CostModel(), 1e5, exposure=exp)["daily"]
+    assert res["gross"].abs().sum() == pytest.approx(0.0)
+
+
+def test_exposure_reduces_drawdown_on_bear():
+    import numpy as np
+    dates = pd.bdate_range("2024-01-02", periods=60)
+    stocks = ["A", "B"]
+    idx = pd.MultiIndex.from_product([dates, stocks], names=["datetime", "instrument"])
+    scores = pd.Series(1.0, index=idx)
+    # bear: -1%/day for second half
+    rets = {d: (0.005 if i < 30 else -0.02) for i, d in enumerate(dates)}
+    fwd = pd.Series([rets[d] for (d, _) in idx], index=idx)
+    base = run_backtest(scores, fwd, Daily(top_k=2), CostModel(), 1e5)["daily"]
+    # exposure: full first half, 0 in bear
+    exp = pd.Series([1.0 if i < 30 else 0.0 for i in range(len(dates))],
+                    index=pd.Index(dates, name="datetime"))
+    over = run_backtest(scores, fwd, Daily(top_k=2), CostModel(), 1e5, exposure=exp)["daily"]
+    base_dd = ((1 + base["net"]).cumprod() / (1 + base["net"]).cumprod().cummax() - 1).min()
+    over_dd = ((1 + over["net"]).cumprod() / (1 + over["net"]).cumprod().cummax() - 1).min()
+    assert over_dd > base_dd  # overlay drawdown is less negative

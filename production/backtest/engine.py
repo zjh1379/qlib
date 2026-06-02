@@ -19,6 +19,7 @@ def run_backtest(
     cost: CostModel,
     capital: float = 100_000.0,
     score_col: str = "score",
+    exposure: pd.Series | None = None,
 ) -> dict:
     """
     scores: Series (datetime,instrument)->score, OR DataFrame with `score_col`.
@@ -38,6 +39,12 @@ def run_backtest(
         turnover = 0.0
         if policy.should_rebalance(i):
             target = policy.target_weights(s_d, current)
+            if exposure is not None and len(target):
+                e = exposure.asof(d) if len(exposure) and d >= exposure.index[0] else 1.0
+                if pd.isna(e):
+                    e = 1.0
+                e = float(min(1.0, max(0.0, e)))
+                target = target * e
             allidx = current.index.union(target.index)
             cur = current.reindex(allidx).fillna(0.0)
             tgt = target.reindex(allidx).fillna(0.0)
