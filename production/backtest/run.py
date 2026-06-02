@@ -46,13 +46,14 @@ def _make_policy(name: str, top_k: int, period: int, exit_k: int):
 
 def build_report(scores: pd.Series, fwd_ret: pd.Series, *, policy_name: str,
                  top_k: int, period: int, exit_k: int, capital: float,
-                 profile: str) -> dict:
+                 profile: str, exposure=None) -> dict:
     policy = _make_policy(policy_name, top_k, period, exit_k)
     cm = cost_model(profile)
-    res = run_backtest(scores, fwd_ret, policy, cm, capital=capital)
+    res = run_backtest(scores, fwd_ret, policy, cm, capital=capital, exposure=exposure)
     return {
         "params": {"policy": policy_name, "top_k": top_k, "period": period,
-                   "exit_k": exit_k, "capital": capital, "profile": profile},
+                   "exit_k": exit_k, "capital": capital, "profile": profile,
+                   "regime": getattr(exposure, "name", None) if exposure is not None else None},
         "metrics": net_metrics(res["daily"]),
         "regimes": net_regime(res["daily"]),
         "final_nav": res["final_nav"],
@@ -75,6 +76,11 @@ def main() -> int:
     ap.add_argument("--neutralize", action="store_true",
                     help="apply sector neutralization to scores before backtest")
     ap.add_argument("--industry-map", default="production/cache/industry_map.parquet")
+    ap.add_argument("--regime", default="none", choices=["none", "trend_ma"])
+    ap.add_argument("--ma-window", type=int, default=120)
+    ap.add_argument("--band", type=float, default=0.10)
+    ap.add_argument("--min-exposure", type=float, default=0.0)
+    ap.add_argument("--vol-target", type=float, default=None)
     args = ap.parse_args()
 
     pred = pd.read_pickle(args.pred_file)
@@ -92,9 +98,18 @@ def main() -> int:
     from .data import load_fwd_returns
     fwd = load_fwd_returns(instruments, start, end, config_path=args.config)
 
+    exposure = None
+    if args.regime != "none":
+        from .market import load_market_proxy
+        from .regime import compute_exposure
+        mkt = load_market_proxy(instruments, start, end, config_path=args.config)
+        exposure = compute_exposure(mkt, method=args.regime, ma_window=args.ma_window,
+                                    band=args.band, min_exposure=args.min_exposure,
+                                    vol_target=args.vol_target)
+
     rep = build_report(scores, fwd, policy_name=args.policy, top_k=args.top_k,
                        period=args.period, exit_k=args.exit_k, capital=args.capital,
-                       profile=args.profile)
+                       profile=args.profile, exposure=exposure)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(rep, indent=2, ensure_ascii=False), encoding="utf-8")

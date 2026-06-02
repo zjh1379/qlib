@@ -39,3 +39,14 @@ def test_load_sector_map(tmp_path):
     m = load_sector_map(str(p))
     assert m["SH600000"] == "银行"
     assert m["SZ000001"] == "银行"
+
+
+def test_build_report_accepts_exposure():
+    dates = [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")]
+    scores = _series({(dates[0], "A"): 1.0, (dates[1], "A"): 1.0})
+    fwd = _series({(dates[0], "A"): 0.05, (dates[1], "A"): 0.05})
+    exp = pd.Series(0.0, index=pd.Index(dates, name="datetime"))
+    rep = build_report(scores, fwd, policy_name="daily", top_k=1, period=5, exit_k=2,
+                       capital=100_000.0, profile="small", exposure=exp)
+    # zero exposure -> ~zero net return -> nav unchanged
+    assert rep["final_nav"] == pytest.approx(100_000.0, rel=1e-6)
