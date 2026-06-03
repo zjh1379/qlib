@@ -75,3 +75,29 @@ class Alpha360_OpenH(Alpha360):
     def get_label_config(self):
         n = self.horizon_days
         return [f"Ref($open, -{n + 1}) / Ref($open, -1) - 1"], ["LABEL0"]
+
+
+# ---------------------------------------------------------------------------
+# Short-term factor handler
+# ---------------------------------------------------------------------------
+# Dual-import: when qlib loads this via module_path="custom_handler" with
+# production/ on sys.path, only `factors.short_term` resolves.
+# When imported as `production.custom_handler` from tests/backend, only
+# `production.factors.short_term` resolves. The try/except handles both.
+try:
+    from production.factors.short_term import short_term_factor_config
+except ModuleNotFoundError:
+    from factors.short_term import short_term_factor_config  # type: ignore[no-redef]
+
+
+class AlphaShortTerm(Alpha158_OpenH):
+    """Alpha158 (open-to-open label) + non-redundant short-term factors.
+
+    Adds OVNGAP / AMT_SURGE / LIMITUP*_CNT20 etc. on top of the 158 features,
+    for the LGBM tabular path. Neural factor injection is deferred (P3+).
+    """
+
+    def get_feature_config(self):
+        fields, names = super().get_feature_config()
+        extra_fields, extra_names = short_term_factor_config()
+        return list(fields) + extra_fields, list(names) + extra_names
