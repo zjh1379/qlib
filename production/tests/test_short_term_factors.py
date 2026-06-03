@@ -43,3 +43,12 @@ def test_alpha_short_term_appends_factors_to_alpha158():
     # superset of Alpha158 (158) + our 6
     assert "OVNGAP" in names and "LIMITUP10_CNT20" in names
     assert len(names) >= 158 + 6
+
+
+def test_resolve_feature_handler():
+    from production.rolling_train import resolve_feature_handler
+    assert resolve_feature_handler("alpha158") == ("Alpha158_OpenH", "custom_handler")
+    assert resolve_feature_handler("shortterm") == ("AlphaShortTerm", "custom_handler")
+    import pytest
+    with pytest.raises(ValueError):
+        resolve_feature_handler("bogus")

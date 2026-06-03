@@ -64,6 +64,23 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MODELS = ("lgbm", "alstm", "tra")
 
 
+def resolve_feature_handler(features: str) -> tuple[str, str]:
+    """Map a --features choice to (handler_class_name, module_path).
+
+    Returns:
+        (handler_class_name, module_path) — suitable for use in handler_cfg
+        and for selecting the handler class to instantiate.
+
+    Raises:
+        ValueError: if `features` is not a recognised choice.
+    """
+    if features == "alpha158":
+        return ("Alpha158_OpenH", "custom_handler")
+    if features == "shortterm":
+        return ("AlphaShortTerm", "custom_handler")
+    raise ValueError(f"unknown features {features!r} — expected 'alpha158' or 'shortterm'")
+
+
 def backfill_fold_end_dates(start: date, end: date, step_weeks: int = 1) -> list[date]:
     """Friday-anchored fold end-dates from start..end, stepping step_weeks each time.
 
@@ -196,12 +213,18 @@ def train_lgbm_horizon(
     horizon: HorizonConfig,
     universe_name: str,
     end_date: date,
+    *,
+    features: str = "alpha158",
 ) -> pd.Series:
     """Train one LightGBM head and return its predictions on the test window.
 
     `universe_name` is the qlib instruments-file name produced by
     `build_universe()` — passed to the handler as a string so qlib resolves it
     via `D.instruments(market=universe_name)`.
+
+    `features` selects the feature handler: "alpha158" (default, backward-
+    compatible) uses Alpha158_OpenH; "shortterm" uses AlphaShortTerm which
+    appends 6 non-redundant short-term factors on top of Alpha158.
 
     Returns a Series indexed by (datetime, instrument) named like 'lgbm_<horizon>'.
     """
@@ -227,9 +250,14 @@ def train_lgbm_horizon(
     if prod_path not in sys.path:
         sys.path.insert(0, prod_path)
 
-    from custom_handler import Alpha158_OpenH  # noqa: E402
+    from custom_handler import Alpha158_OpenH, AlphaShortTerm  # noqa: E402
 
-    handler = Alpha158_OpenH(
+    _handler_cls_map = {
+        "Alpha158_OpenH": Alpha158_OpenH,
+        "AlphaShortTerm": AlphaShortTerm,
+    }
+    cls_name, module_path = resolve_feature_handler(features)
+    handler = _handler_cls_map[cls_name](
         horizon_days=cfg.horizon_days[horizon.name],
         start_time=str(s.train_start),
         end_time=str(s.test_end),
@@ -251,8 +279,8 @@ def train_lgbm_horizon(
     # Strip segment-specific kwargs so daily_inference can substitute its
     # own start_time / end_time / instruments.
     handler_cfg = {
-        "class": "Alpha158_OpenH",
-        "module_path": "custom_handler",
+        "class": cls_name,
+        "module_path": module_path,
         "kwargs": {
             "horizon_days": cfg.horizon_days[horizon.name],
             "fit_start_time": str(s.train_start),
@@ -308,6 +336,7 @@ def run_once(
     test_weeks_override: int | None = None,
     train_years_override: int | None = None,
     skip_if_exists: bool = False,
+    features: str = "alpha158",
 ) -> Path | None:
     """Run one weekly iteration. Returns the path to the written pred.pkl,
     or None when `skip_pool=True` (caller is responsible for pooling).
@@ -325,6 +354,9 @@ def run_once(
                             in the experiment, skip training and return the
                             existing pred pickle (if present) or fall through to
                             retrain if the pickle is missing.
+      features:             feature handler selection: "alpha158" (default,
+                            backward-compatible) or "shortterm" (Alpha158 + 6
+                            non-redundant short-term factors).
     """
     # Apply horizon overrides (creates a shadow cfg — does not mutate the original).
     if test_weeks_override is not None or train_years_override is not None:
@@ -377,7 +409,7 @@ def run_once(
             continue
         if spec["id"] == "lgbm":
             for h in cfg.horizons:
-                s = train_lgbm_horizon(cfg, h, universe_name, end_date)
+                s = train_lgbm_horizon(cfg, h, universe_name, end_date, features=features)
                 series_list.append(s)
         elif spec["id"] == "alstm":
             from production.train_alstm import train_alstm_multihead  # added in T13
@@ -519,6 +551,7 @@ def run_backfill(
     test_weeks_override: int | None = None,
     train_years_override: int | None = None,
     skip_if_exists: bool = True,
+    features: str = "alpha158",
 ) -> list[Path]:
     """Loop run_once over every Friday in [start, end]. Writes one
     pred_<friday>.pkl per iteration. Returns list of written paths.
@@ -533,6 +566,8 @@ def run_backfill(
                             data only starts 2018 and we need 2021+ OOF).
       skip_if_exists:       forwarded to run_once; default True so backfill
                             runs are resumable by default.
+      features:             forwarded to run_once; selects the LGBM feature
+                            handler ("alpha158" default or "shortterm").
     """
     fold_dates = backfill_fold_end_dates(start, end, step_weeks)
     total = len(fold_dates)
@@ -550,6 +585,7 @@ def run_backfill(
                 test_weeks_override=test_weeks_override,
                 train_years_override=train_years_override,
                 skip_if_exists=skip_if_exists,
+                features=features,
             )
             if path is not None:
                 paths.append(path)
@@ -594,6 +630,16 @@ def main() -> None:
             "reading the per-model mlflow recorders."
         ),
     )
+    p_run.add_argument(
+        "--features",
+        choices=["alpha158", "shortterm"],
+        default="alpha158",
+        help=(
+            "Feature handler for the LGBM model. "
+            "'alpha158' (default) uses Alpha158_OpenH (backward-compatible). "
+            "'shortterm' uses AlphaShortTerm (Alpha158 + 6 short-term factors)."
+        ),
+    )
 
     p_back = sub.add_parser("backfill",
         help="Loop run-once over every Friday in [start, end]. ~5-30 min per week.")
@@ -635,6 +681,16 @@ def main() -> None:
             "Other models in cfg are disabled for this invocation."
         ),
     )
+    p_back.add_argument(
+        "--features",
+        choices=["alpha158", "shortterm"],
+        default="alpha158",
+        help=(
+            "Feature handler for the LGBM model. "
+            "'alpha158' (default) uses Alpha158_OpenH (backward-compatible). "
+            "'shortterm' uses AlphaShortTerm (Alpha158 + 6 short-term factors)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -648,7 +704,7 @@ def main() -> None:
                 if spec["id"] not in wanted:
                     spec["enabled"] = False
             _log.info("run_once_only_models=%s", sorted(wanted))
-        path = run_once(cfg, end, skip_pool=args.skip_pool)
+        path = run_once(cfg, end, skip_pool=args.skip_pool, features=args.features)
         if path is not None:
             print(f"OK: wrote {path}")
         else:
@@ -669,6 +725,7 @@ def main() -> None:
             step_weeks=args.step_weeks,
             test_weeks_override=args.test_weeks,
             train_years_override=args.train_years,
+            features=args.features,
         )
         print(f"OK: backfilled {len(paths)} folds")
         for p in paths:

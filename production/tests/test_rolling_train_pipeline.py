@@ -35,7 +35,7 @@ def test_run_once_writes_pred_pkl_via_fallback_when_qlib_unavailable(tmp_path, m
         lambda c, d: ([f"SH60{i:04d}" for i in range(5)], "csi800_pit_test"),
     )
 
-    def _fake_lgbm(cfg, h, universe_name, end):
+    def _fake_lgbm(cfg, h, universe_name, end, *, features="alpha158"):
         return _stub_base(end, "lgbm")[
             [h2.name for h2 in cfg.horizons].index(h.name)
         ]
