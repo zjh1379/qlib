@@ -215,6 +215,7 @@ def train_lgbm_horizon(
     end_date: date,
     *,
     features: str = "alpha158",
+    objective: str = "mse",
 ) -> pd.Series:
     """Train one LightGBM head and return its predictions on the test window.
 
@@ -274,7 +275,12 @@ def train_lgbm_horizon(
         },
     )
 
-    model = LGBModel(**lgbm_yaml["model"]["kwargs"])
+    _lgbm_kwargs = dict(lgbm_yaml["model"]["kwargs"])
+    if objective == "lambdarank":
+        from production.lgbm_rank import LGBRankModel
+        model = LGBRankModel(**_lgbm_kwargs)  # ignores `loss`, fixes objective=lambdarank
+    else:
+        model = LGBModel(**_lgbm_kwargs)
     # Handler config for daily_inference to rebuild features on new dates.
     # Strip segment-specific kwargs so daily_inference can substitute its
     # own start_time / end_time / instruments.
@@ -337,6 +343,7 @@ def run_once(
     train_years_override: int | None = None,
     skip_if_exists: bool = False,
     features: str = "alpha158",
+    objective: str = "mse",
 ) -> Path | None:
     """Run one weekly iteration. Returns the path to the written pred.pkl,
     or None when `skip_pool=True` (caller is responsible for pooling).
@@ -409,7 +416,7 @@ def run_once(
             continue
         if spec["id"] == "lgbm":
             for h in cfg.horizons:
-                s = train_lgbm_horizon(cfg, h, universe_name, end_date, features=features)
+                s = train_lgbm_horizon(cfg, h, universe_name, end_date, features=features, objective=objective)
                 series_list.append(s)
         elif spec["id"] == "alstm":
             from production.train_alstm import train_alstm_multihead  # added in T13
@@ -568,6 +575,7 @@ def run_backfill(
     train_years_override: int | None = None,
     skip_if_exists: bool = True,
     features: str = "alpha158",
+    objective: str = "mse",
 ) -> list[Path]:
     """Loop run_once over every Friday in [start, end]. Writes one
     pred_<friday>.pkl per iteration. Returns list of written paths.
@@ -602,6 +610,7 @@ def run_backfill(
                 train_years_override=train_years_override,
                 skip_if_exists=skip_if_exists,
                 features=features,
+                objective=objective,
             )
             if path is not None:
                 paths.append(path)
@@ -660,6 +669,16 @@ def main() -> None:
         ),
     )
 
+    p_run.add_argument(
+        "--objective",
+        choices=["mse", "lambdarank"],
+        default="mse",
+        help=(
+            "LGBM objective: 'mse' (default, regression) or 'lambdarank' "
+            "(learning-to-rank; optimizes top-of-ranking via production.lgbm_rank.LGBRankModel)."
+        ),
+    )
+
     p_back = sub.add_parser("backfill",
         help="Loop run-once over every Friday in [start, end]. ~5-30 min per week.")
     p_back.add_argument("--start", required=True, help="YYYY-MM-DD inclusive")
@@ -714,6 +733,13 @@ def main() -> None:
         ),
     )
 
+    p_back.add_argument(
+        "--objective",
+        choices=["mse", "lambdarank"],
+        default="mse",
+        help="LGBM objective: 'mse' (default) or 'lambdarank' (learning-to-rank).",
+    )
+
     args = parser.parse_args()
 
     if args.cmd == "run-once":
@@ -726,7 +752,7 @@ def main() -> None:
                 if spec["id"] not in wanted:
                     spec["enabled"] = False
             _log.info("run_once_only_models=%s", sorted(wanted))
-        path = run_once(cfg, end, skip_pool=args.skip_pool, features=args.features)
+        path = run_once(cfg, end, skip_pool=args.skip_pool, features=args.features, objective=args.objective)
         if path is not None:
             print(f"OK: wrote {path}")
         else:
@@ -748,6 +774,7 @@ def main() -> None:
             test_weeks_override=args.test_weeks,
             train_years_override=args.train_years,
             features=args.features,
+            objective=args.objective,
         )
         print(f"OK: backfilled {len(paths)} folds")
         for p in paths:
