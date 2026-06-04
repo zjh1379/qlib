@@ -1,0 +1,53 @@
+# P2b short-term-factor experiment config. IDENTICAL to rolling_ensemble.yaml
+# except experiment_name — isolates the factor LGBM recorders into their own
+# mlflow experiment so the factor backfill does NOT (a) skip via existing
+# baseline recorders nor (b) contaminate pooling (pool_range concats every
+# name-matching recorder). Baseline recorders in rolling_v2_ensemble stay
+# untouched; compare pooled oof_lgbmfac_* vs the saved oof_lgbm_2021_2026.pkl.
+
+experiment_name: rolling_v2_ensemble_fac
+
+universe: csi800   # CSI300 + CSI500 PIT union
+universe_extras:
+  - etfs
+  - custom
+provider_uri: ~/.qlib/qlib_data/cn_data_bs
+region: cn
+
+horizons:
+  - name: "1d"
+    horizon_days: 1
+    train_years: 3
+    valid_years: 1
+    stack_years: 1
+    test_weeks: 1
+  - name: "5d"
+    horizon_days: 5
+    train_years: 5
+    valid_years: 1
+    stack_years: 1
+    test_weeks: 1
+  - name: "20d"
+    horizon_days: 20
+    train_years: 7
+    valid_years: 1
+    stack_years: 1
+    test_weeks: 1
+
+models:
+  - id: lgbm
+    config: production/configs/lgbm_alpha158_multi.yaml
+    enabled: true
+  - id: alstm
+    config: production/configs/alstm_alpha360.yaml
+    enabled: true
+  - id: tra
+    config: production/configs/tra_alpha360.yaml
+    enabled: true
+
+post_process:
+  ewma_alpha: 0.5
+  cost_bps: 10
+
+mlruns_archive:
+  keep_weeks: 8

@@ -633,11 +633,14 @@ def main() -> None:
     p_run.add_argument(
         "--features",
         choices=["alpha158", "shortterm"],
-        default="alpha158",
+        default="shortterm",
         help=(
-            "Feature handler for the LGBM model. "
-            "'alpha158' (default) uses Alpha158_OpenH (backward-compatible). "
-            "'shortterm' uses AlphaShortTerm (Alpha158 + 6 short-term factors)."
+            "Feature handler for the LGBM model. 'shortterm' (DEFAULT since "
+            "2026-06-03) = AlphaShortTerm (Alpha158 + 6 short-term factors; "
+            "+12pp net CAGR / Calmar 0.34->0.77 vs alpha158, see "
+            "docs/.../2026-06-03-shortterm-factors-results.md). run_split passes "
+            "no --features, so this default is what production retrains use. "
+            "'alpha158' selects the original Alpha158_OpenH (no short-term factors)."
         ),
     )
 
@@ -684,11 +687,14 @@ def main() -> None:
     p_back.add_argument(
         "--features",
         choices=["alpha158", "shortterm"],
-        default="alpha158",
+        default="shortterm",
         help=(
-            "Feature handler for the LGBM model. "
-            "'alpha158' (default) uses Alpha158_OpenH (backward-compatible). "
-            "'shortterm' uses AlphaShortTerm (Alpha158 + 6 short-term factors)."
+            "Feature handler for the LGBM model. 'shortterm' (DEFAULT since "
+            "2026-06-03) = AlphaShortTerm (Alpha158 + 6 short-term factors; "
+            "+12pp net CAGR / Calmar 0.34->0.77 vs alpha158, see "
+            "docs/.../2026-06-03-shortterm-factors-results.md). run_split passes "
+            "no --features, so this default is what production retrains use. "
+            "'alpha158' selects the original Alpha158_OpenH (no short-term factors)."
         ),
     )
 
