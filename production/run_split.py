@@ -260,6 +260,15 @@ def _pool_from_recorders(end_date: date, cfg_path: str) -> Path:
     write_pred_pkl(base, out_path)
     _log.info("pool_wrote path=%s rows=%d cols=%s", out_path, len(base), list(base.columns))
 
+    # Seed the serving recorder: save pred.pkl into ensemble_<end> so the backend
+    # (get_latest_recorder_id) + daily_inference can serve/extend it. This is the
+    # link that was missing — run_split previously wrote ONLY the file above, so
+    # live serving froze at the last manually-pooled recorder. No-op (recency-
+    # guarded) for historical backfill folds so they never hijack serving.
+    from production.train_helpers import seed_serving_recorder
+    if seed_serving_recorder(exp_name, end_date, base):
+        _log.info("seeded_serving_pred recorder=ensemble_%s rows=%d", end_str, len(base))
+
     # === Refit per-horizon calibration on the valid slices of contributing
     # recorders. Stored in production/cache/latest_calibration.pkl for
     # daily_inference + backend to apply. Fail-soft.

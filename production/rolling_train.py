@@ -480,7 +480,9 @@ def run_once(
     write_pred_pkl(out, pred_path)
     _log.info("pred_pkl_written path=%s rows=%d", str(pred_path), len(out))
 
-    # Step ⑦ — Scorecard on the test window (if labels are available)
+    # Step ⑦ — Scorecard on the test window (best-effort; needs FUTURE labels,
+    # which don't exist yet for the most recent live dates -> scorecard stays {}).
+    scorecard: dict = {}
     try:
         from qlib.data import D
         h5 = next(h for h in cfg.horizons if h.name == "5d")
@@ -500,11 +502,25 @@ def run_once(
         score_window = out.reset_index().set_index(["datetime", "instrument"])["score"]
         scorecard = compute_scorecard(score_window, labels, top_k=30, bps=cfg.cost_bps)
         _log.info("scorecard %s", scorecard)
-        from qlib.workflow import R
-        with R.start(experiment_name=cfg.experiment_name, recorder_name=f"ensemble_{end_date}"):
-            R.log_metrics(**{k: v for k, v in scorecard.items() if pd.notna(v)})
     except Exception as exc:
         _log.warning("scorecard_failed error=%s", str(exc))
+
+    # Step ⑦b — Persist the ensemble_<end_date> recorder ONCE. For LIVE folds,
+    # seed pred.pkl so the backend (get_latest_recorder_id) + daily_inference can
+    # serve/extend it — the missing link that froze live serving. Historical
+    # backfill folds get metrics only (seeding them would hijack serving via
+    # start_time ordering with a stale data date).
+    try:
+        from qlib.workflow import R
+        from production.train_helpers import is_live_fold
+        with R.start(experiment_name=cfg.experiment_name, recorder_name=f"ensemble_{end_date}"):
+            if is_live_fold(end_date):
+                R.save_objects(**{"pred.pkl": out})
+                _log.info("seeded_serving_pred recorder=ensemble_%s rows=%d", end_date, len(out))
+            if scorecard:
+                R.log_metrics(**{k: v for k, v in scorecard.items() if pd.notna(v)})
+    except Exception as exc:
+        _log.warning("ensemble_recorder_persist_failed error=%s", str(exc))
 
     # Auto-archive recorders older than cfg.archive_weeks
     from production.mlruns_archive import archive_old_recorders

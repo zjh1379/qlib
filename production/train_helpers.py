@@ -19,6 +19,53 @@ import pandas as pd
 
 _log = logging.getLogger(__name__)
 
+# Folds whose end_date is within this many days of "today" are treated as LIVE
+# and seed the serving recorder; older (historical backfill) folds do not.
+LIVE_SEED_MAX_AGE_DAYS = 10
+
+
+def is_live_fold(end_date, *, today=None, max_age_days: int = LIVE_SEED_MAX_AGE_DAYS) -> bool:
+    """True when `end_date` is recent enough that its pooled prediction should
+    seed the serving recorder (backend get_latest_recorder_id / daily_inference).
+
+    Historical backfill folds return False on purpose: get_latest_recorder_id and
+    daily_inference._find_pooled_recorder order recorders by mlflow start_time, so
+    a backfill's last-trained (newest start_time) fold would otherwise hijack
+    serving with a STALE data date. Accepts a date or an ISO 'YYYY-MM-DD' string.
+    """
+    from datetime import date as _date
+    end = end_date if isinstance(end_date, _date) else _date.fromisoformat(str(end_date)[:10])
+    ref = today or _date.today()
+    return 0 <= (ref - end).days <= max_age_days
+
+
+def seed_serving_recorder(experiment_name: str, end_date, pred_df, *,
+                          today=None, max_age_days: int = LIVE_SEED_MAX_AGE_DAYS,
+                          _r=None) -> bool:
+    """Save `pred_df` as the pred.pkl artifact of the `ensemble_<end_date>`
+    recorder so the backend (get_latest_recorder_id) + daily_inference can
+    serve/extend it. THIS is the link the automated pooling paths were missing
+    (they wrote only the examples/mlruns/pred_<date>.pkl file), which froze live
+    serving at the last manually-pooled recorder.
+
+    No-op (returns False) for non-live folds (see is_live_fold) so historical
+    backfill folds never hijack serving. Fail-soft: returns False on any error.
+    `_r` injects a fake qlib.workflow.R for offline testing.
+    """
+    from datetime import date as _date
+    end = end_date if isinstance(end_date, _date) else _date.fromisoformat(str(end_date)[:10])
+    if not is_live_fold(end, today=today, max_age_days=max_age_days):
+        return False
+    try:
+        if _r is None:
+            from qlib.workflow import R as _r
+        with _r.start(experiment_name=experiment_name, recorder_name=f"ensemble_{end}"):
+            _r.save_objects(**{"pred.pkl": pred_df})
+        return True
+    except Exception as exc:
+        _log.warning("seed_serving_recorder_failed end_date=%s error=%s", end, exc)
+        return False
+
 
 def save_calibration_artifacts(model, dataset, handler_cfg, *, recorder=None) -> None:
     """Save the 4 extra artifacts to the current mlflow recorder.
