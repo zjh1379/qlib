@@ -58,7 +58,10 @@ def pool_range(start: date, end: date, *, models=DEFAULT_MODELS,
     recs = list(recs.values()) if isinstance(recs, dict) else recs
 
     pat = re.compile(r"^(%s)_(1d|5d|20d)_(\d{4}-\d{2}-\d{2})$" % "|".join(models))
-    cols: dict[str, list[pd.Series]] = {}
+    # Keep only the LATEST recorder per (model, horizon, fold). A re-run after a
+    # failed/partial fold creates a duplicate recorder for the same date;
+    # concatenating both would yield a non-unique (datetime,instrument) index.
+    best: dict[tuple, tuple] = {}
     for r in recs:
         m = pat.match(_rec_name(r))
         if not m:
@@ -66,7 +69,13 @@ def pool_range(start: date, end: date, *, models=DEFAULT_MODELS,
         fold = date.fromisoformat(m.group(3))
         if not (start <= fold <= end):
             continue
-        model, h = m.group(1), m.group(2)
+        key = (m.group(1), m.group(2), fold)
+        st = r.info.get("start_time", "") if hasattr(r, "info") else ""
+        if key not in best or str(st) > str(best[key][0]):
+            best[key] = (st, r)
+
+    cols: dict[str, list[pd.Series]] = {}
+    for (model, h, _fold), (_st, r) in best.items():
         try:
             s = r.load_object(f"pred_{h}.pkl")
         except Exception:
