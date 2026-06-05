@@ -71,6 +71,15 @@ def test_one_zi_limit_up_not_fillable():
     assert entry_multiplier(d, 10.0, "SH600000", rule="open") is None
 
 
+def test_first_bar_zero_open_falls_back_to_close():
+    # baostock data glitch: first 5min bar open=0 -> day-open proxy = first bar close=10.0
+    d = _day([0, 10.1], [10.2, 10.2], [9.9, 10.0], [10.0, 10.1], [100, 100])
+    # vwap amount = closes*vols = [1000,1010]; vwap=2010/200=10.05; day-open=10.0 -> mult 1.005
+    assert entry_multiplier(d, 9.8, "SH600000", rule="vwap") == pytest.approx(10.05 / 10.0)
+    # open rule still 1.0 (price == day-open proxy)
+    assert entry_multiplier(d, 9.8, "SH600000", rule="open") == pytest.approx(1.0)
+
+
 def test_parse_baostock_5min_types():
     from production.intraday.fetch_5min import parse_baostock_5min
     raw = pd.DataFrame({

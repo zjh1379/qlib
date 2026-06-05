@@ -43,7 +43,11 @@ def entry_multiplier(day_bars: pd.DataFrame, prev_close: float, instrument: str,
     if not is_buy_fillable(day_bars, prev_close, instrument):
         return None
     o = float(day_bars["open"].iloc[0])
-    if o <= 0:
+    if not (o > 0):
+        # baostock data glitch: first 5min bar's open is occasionally 0/NaN even
+        # when the stock traded all day -> use the first bar's close as day-open proxy.
+        o = float(day_bars["close"].iloc[0])
+    if not (o > 0):
         return None
     close = float(day_bars["close"].iloc[-1])
     if rule == "open":

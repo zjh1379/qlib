@@ -78,3 +78,6 @@ backend/uvicorn*.log
 backend/pytest_output.log
 backend/uvicorn_*.log
 frontend/tsconfig.tsbuildinfo
+
+# intraday P1 5min cache (large, regenerable from baostock)
+production/intraday/cache/

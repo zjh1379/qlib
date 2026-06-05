@@ -50,7 +50,7 @@ def simulate(scores, *, rule, top_k=5, period=5, k=0.01, g=0.03,
     ret = open_adj(exit)/entry_adj - 1 - cost; aggregate equal-weight per
     rebalance into a period-return series -> net metrics. rule='open' reproduces
     the open baseline (multiplier 1.0, no fetch)."""
-    from production.intraday.entry_rules import entry_multiplier
+    from production.intraday.entry_rules import entry_multiplier, is_buy_fillable
     from production.intraday.fetch_5min import fetch_5min, prev_close_raw
     trades = enumerate_trades(scores, top_k, period)
     insts = sorted({t["instrument"] for t in trades})
@@ -58,34 +58,47 @@ def simulate(scores, *, rule, top_k=5, period=5, k=0.01, g=0.03,
     opens = daily_open_adj(insts, str(dmin.date()), str(dmax.date()))
     per_rebalance: dict = {}
     improve_bps: list = []
-    n_skip = n_fallback = 0
+    n_filled = n_unfillable = n_gap_skip = n_no_open = n_fallback = 0
     for t in trades:
         oe = opens.get((t["entry_date"], t["instrument"]))
         ox = opens.get((t["exit_date"], t["instrument"]))
         if oe is None or ox is None or not (oe > 0):
-            continue
+            n_no_open += 1; continue
         mult = 1.0
         if rule != "open":
             ed = t["entry_date"].strftime("%Y-%m-%d")
             bars = fetch_5min(t["instrument"], ed, ed)
             pc = prev_close_raw(t["instrument"], ed)
-            m = entry_multiplier(bars, pc if pc else 0.0, t["instrument"],
-                                 rule=rule, k=k, g=g) if pc else None
-            if m is None:
-                n_skip += 1; continue       # unfillable / don't-chase -> skip trade
-            mult = m
-            improve_bps.append((1.0 - mult) * 1e4)   # +bp = cheaper entry than open
+            has_data = (bars is not None and not bars.empty
+                        and float(bars["volume"].sum()) > 0
+                        and float(bars["open"].max()) > 0)
+            if not has_data or pc is None:
+                n_fallback += 1                  # halt / no 5min / no prev_close -> degrade to open (mult 1.0)
+            elif not is_buy_fillable(bars, pc, t["instrument"]):
+                n_unfillable += 1; continue      # limit-up (一字封板): genuinely can't buy -> skip
+            else:
+                m = entry_multiplier(bars, pc, t["instrument"], rule=rule, k=k, g=g)
+                if m is None:
+                    n_gap_skip += 1; continue    # gap_cond don't-chase -> intentional skip
+                mult = m
+                improve_bps.append((1.0 - mult) * 1e4)   # +bp = cheaper entry than open
         entry_adj = float(oe) * mult
         ret = float(ox) / entry_adj - 1 - cost_bps / 1e4
         per_rebalance.setdefault(t["rebalance_step"], []).append(ret)
+        n_filled += 1
     periods = sorted(per_rebalance)
     pr = pd.Series([np.mean(per_rebalance[p]) for p in periods], index=periods)
     eq = (1 + pr).cumprod()
     n = len(pr)
     ann = (eq.iloc[-1] ** (252 / (period * n)) - 1) if n and eq.iloc[-1] > 0 else float("nan")
     dd = float((eq / eq.cummax() - 1).min()) if n else float("nan")
+    n_trades = len(trades)
     return {"rule": rule, "net_cagr": ann,
             "calmar": (ann / abs(dd)) if dd else float("nan"),
             "max_dd": dd, "win": float((pr > 0).mean()) if n else float("nan"),
-            "n_periods": n, "n_skipped": n_skip,
+            "n_periods": n, "n_trades": n_trades, "n_filled": n_filled,
+            "n_unfillable": n_unfillable, "n_gap_skip": n_gap_skip,
+            "n_no_open": n_no_open, "n_fallback": n_fallback,
+            "unfillable_pct": (n_unfillable / n_trades) if n_trades else 0.0,
+            "fallback_pct": (n_fallback / n_trades) if n_trades else 0.0,
             "improve_bps_med": float(np.median(improve_bps)) if improve_bps else 0.0}
