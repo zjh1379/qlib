@@ -69,3 +69,15 @@ def test_one_zi_limit_up_not_fillable():
     d = _day([11.0, 11.0], [11.0, 11.0], [11.0, 11.0], [11.0, 11.0], [100, 100])
     assert is_buy_fillable(d, prev_close=10.0, instrument="SH600000") is False
     assert entry_multiplier(d, 10.0, "SH600000", rule="open") is None
+
+
+def test_parse_baostock_5min_types():
+    from production.intraday.fetch_5min import parse_baostock_5min
+    raw = pd.DataFrame({
+        "time": ["20241202093500000", "20241202094000000"],
+        "open": ["10.0", "10.1"], "high": ["10.2", "10.2"], "low": ["9.9", "10.0"],
+        "close": ["10.1", "10.15"], "volume": ["100", "200"], "amount": ["1010", "2030"]})
+    out = parse_baostock_5min(raw)
+    assert str(out["datetime"].iloc[0]) == "2024-12-02 09:35:00"
+    assert out["open"].dtype.kind == "f" and out["volume"].iloc[1] == 200.0
+    assert list(out.columns)[:1] == ["datetime"]
