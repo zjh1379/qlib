@@ -1,32 +1,45 @@
 """Fetch raw 5-min bars (+ prev daily close) from baostock, with parquet cache.
 Network calls are isolated here; entry_rules/exec_backtest stay pure/offline.
 
-A single baostock session is reused across calls (login once, logout at process
-exit) to avoid per-call login churn during large sweeps. prev_close is cached to
-JSON so it is fetched once and reused across rules."""
+Robustness: baostock drops its socket after many rapid queries. We keep one warm
+session but verify every login/query `error_code`; on any failure we force a clean
+re-login and retry. Results are cached ONLY on a genuine query success (error_code
+'0') — a 0-row success caches as real "no-data" (halt), while a connection failure
+returns empty WITHOUT caching, so a re-run transparently resumes."""
 from __future__ import annotations
 from pathlib import Path
 import atexit
 import json
+import time
 import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CACHE = REPO_ROOT / "production" / "intraday" / "cache"
 _PREV_CLOSE_FP = CACHE / "_prev_close.json"
+_COLS = ["datetime", "open", "high", "low", "close", "volume", "amount"]
 
 _logged_in = False
 _prev_cache: dict | None = None
 
 
+def _do_login() -> bool:
+    import baostock as bs
+    lg = bs.login()
+    return lg is not None and getattr(lg, "error_code", "1") == "0"
+
+
 def _ensure_login() -> None:
-    """Idempotent baostock login; logs out once at process exit."""
+    """Idempotent baostock login (verified); logs out once at process exit."""
     global _logged_in
     if _logged_in:
         return
-    import baostock as bs
-    bs.login()
-    _logged_in = True
-    atexit.register(_logout)
+    for attempt in range(4):
+        if _do_login():
+            _logged_in = True
+            atexit.register(_logout)
+            return
+        time.sleep(0.5 * (attempt + 1))
+    raise RuntimeError("baostock login failed after retries")
 
 
 def _logout() -> None:
@@ -41,32 +54,57 @@ def _logout() -> None:
     _logged_in = False
 
 
+def _force_relogin() -> None:
+    global _logged_in
+    import baostock as bs
+    try:
+        bs.logout()
+    except Exception:
+        pass
+    _logged_in = False
+
+
+def _query(make_rs, max_try: int = 4):
+    """make_rs: fn(bs) -> ResultData. Returns get_data() DataFrame on success
+    (error_code '0'), or None if the connection failed after retries."""
+    import baostock as bs
+    for attempt in range(max_try):
+        _ensure_login()
+        try:
+            rs = make_rs(bs)
+            if rs is not None and getattr(rs, "error_code", "1") == "0":
+                return rs.get_data()
+        except Exception:
+            pass
+        _force_relogin()                       # drop the dead socket; next loop re-logins
+        time.sleep(0.5 * (attempt + 1))
+    return None
+
+
 def parse_baostock_5min(raw: pd.DataFrame) -> pd.DataFrame:
     """baostock 5min get_data() (all-string cols) -> typed, with parsed `datetime`."""
     df = pd.DataFrame()
     df["datetime"] = pd.to_datetime(raw["time"].str[:14], format="%Y%m%d%H%M%S")
     for c in ("open", "high", "low", "close", "volume", "amount"):
         df[c] = pd.to_numeric(raw[c], errors="coerce")
-    return df[["datetime", "open", "high", "low", "close", "volume", "amount"]]
+    return df[_COLS]
 
 
 def fetch_5min(instrument: str, start: str, end: str) -> pd.DataFrame:
-    """Return typed 5min bars for [start,end] inclusive. Cached per (inst,start,end)
-    call as one parquet (per-month sharding is overkill for P1)."""
+    """Return typed 5min bars for [start,end] inclusive, cached per (inst,start,end)
+    parquet. Connection failure -> empty DataFrame, NOT cached (re-tryable)."""
     from production.intraday.entry_rules import bs_code
     CACHE.mkdir(parents=True, exist_ok=True)
     fp = CACHE / f"{instrument}_{start}_{end}.parquet"
     if fp.exists():
         return pd.read_parquet(fp)
-    import baostock as bs
-    _ensure_login()
-    rs = bs.query_history_k_data_plus(
+    df = _query(lambda bs: bs.query_history_k_data_plus(
         bs_code(instrument), "time,open,high,low,close,volume,amount",
-        start_date=start, end_date=end, frequency="5", adjustflag="3")
-    raw = rs.get_data()
-    out = parse_baostock_5min(raw) if raw is not None and len(raw) else \
-        pd.DataFrame(columns=["datetime", "open", "high", "low", "close", "volume", "amount"])
-    out.to_parquet(fp)
+        start_date=start, end_date=end, frequency="5", adjustflag="3"))
+    if df is None:
+        return pd.DataFrame(columns=_COLS)     # connection failed -> do not cache
+    out = parse_baostock_5min(df) if len(df) else pd.DataFrame(columns=_COLS)
+    out.to_parquet(fp)                         # success (incl. genuine 0-row no-data)
     return out
 
 
@@ -85,23 +123,22 @@ def _prev_close_cache() -> dict:
 
 def prev_close_raw(instrument: str, date: str) -> float | None:
     """Raw (unadjusted) close of the last trading day strictly before `date`,
-    via baostock daily — needed for limit-up / gap detection on raw intraday.
-    Cached to JSON (key=inst_date); None results are cached too."""
+    via baostock daily. Cached to JSON (key=inst_date). Connection failure ->
+    None and NOT cached (re-tryable); a genuine 'no prior day' caches as null."""
     cache = _prev_close_cache()
     key = f"{instrument}_{date}"
     if key in cache:
         v = cache[key]
         return float(v) if v is not None else None
     from production.intraday.entry_rules import bs_code
-    import baostock as bs
-    _ensure_login()
     start = (pd.Timestamp(date) - pd.Timedelta(days=12)).date().isoformat()
-    rs = bs.query_history_k_data_plus(bs_code(instrument), "date,close",
-                                      start_date=start, end_date=date,
-                                      frequency="d", adjustflag="3")
-    d = rs.get_data()
+    d = _query(lambda bs: bs.query_history_k_data_plus(
+        bs_code(instrument), "date,close", start_date=start, end_date=date,
+        frequency="d", adjustflag="3"))
+    if d is None:
+        return None                            # connection failed -> do not cache
     val: float | None = None
-    if d is not None and len(d) >= 2:
+    if len(d) >= 1:
         d = d[d["date"] < date]
         if len(d):
             val = float(d["close"].iloc[-1])

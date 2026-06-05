@@ -57,6 +57,7 @@ def simulate(scores, *, rule, top_k=5, period=5, k=0.01, g=0.03,
     dmin = min(t["entry_date"] for t in trades); dmax = max(t["exit_date"] for t in trades)
     opens = daily_open_adj(insts, str(dmin.date()), str(dmax.date()))
     per_rebalance: dict = {}
+    step_date: dict = {}
     improve_bps: list = []
     n_filled = n_unfillable = n_gap_skip = n_no_open = n_fallback = 0
     for t in trades:
@@ -85,13 +86,19 @@ def simulate(scores, *, rule, top_k=5, period=5, k=0.01, g=0.03,
         entry_adj = float(oe) * mult
         ret = float(ox) / entry_adj - 1 - cost_bps / 1e4
         per_rebalance.setdefault(t["rebalance_step"], []).append(ret)
+        step_date[t["rebalance_step"]] = t["decision_date"]
         n_filled += 1
     periods = sorted(per_rebalance)
-    pr = pd.Series([np.mean(per_rebalance[p]) for p in periods], index=periods)
+    idx = pd.DatetimeIndex([step_date[p] for p in periods])
+    pr = pd.Series([float(np.mean(per_rebalance[p])) for p in periods], index=idx)
     eq = (1 + pr).cumprod()
     n = len(pr)
     ann = (eq.iloc[-1] ** (252 / (period * n)) - 1) if n and eq.iloc[-1] > 0 else float("nan")
     dd = float((eq / eq.cummax() - 1).min()) if n else float("nan")
+    by_year = {}
+    for y in sorted({d.year for d in pr.index}):
+        py = pr[pr.index.year == y]
+        by_year[int(y)] = float((1 + py).prod() - 1) if len(py) else float("nan")
     n_trades = len(trades)
     return {"rule": rule, "net_cagr": ann,
             "calmar": (ann / abs(dd)) if dd else float("nan"),
@@ -101,4 +108,5 @@ def simulate(scores, *, rule, top_k=5, period=5, k=0.01, g=0.03,
             "n_no_open": n_no_open, "n_fallback": n_fallback,
             "unfillable_pct": (n_unfillable / n_trades) if n_trades else 0.0,
             "fallback_pct": (n_fallback / n_trades) if n_trades else 0.0,
-            "improve_bps_med": float(np.median(improve_bps)) if improve_bps else 0.0}
+            "improve_bps_med": float(np.median(improve_bps)) if improve_bps else 0.0,
+            "by_year": by_year}
