@@ -8,6 +8,11 @@ if _P and _P not in sys.path[:1]:
 from pathlib import Path
 import numpy as np, pandas as pd
 
+# Plausible same-day entry-price / open ratio. A multiplier outside this band can
+# only come from a bad 5min print (zero/garbage bar) -> treat as glitch, fall back
+# to the open baseline rather than book an impossible fill.
+MULT_LO, MULT_HI = 0.5, 1.5
+
 
 def enumerate_trades(scores: pd.Series, top_k: int = 5, period: int = 5) -> list[dict]:
     """Walk the fixed/period rebalance schedule; on each rebalance day pick top_k
@@ -59,7 +64,7 @@ def simulate(scores, *, rule, top_k=5, period=5, k=0.01, g=0.03,
     per_rebalance: dict = {}
     step_date: dict = {}
     improve_bps: list = []
-    n_filled = n_unfillable = n_gap_skip = n_no_open = n_fallback = 0
+    n_filled = n_unfillable = n_gap_skip = n_no_open = n_fallback = n_glitch = 0
     for t in trades:
         oe = opens.get((t["entry_date"], t["instrument"]))
         ox = opens.get((t["exit_date"], t["instrument"]))
@@ -81,8 +86,11 @@ def simulate(scores, *, rule, top_k=5, period=5, k=0.01, g=0.03,
                 m = entry_multiplier(bars, pc, t["instrument"], rule=rule, k=k, g=g)
                 if m is None:
                     n_gap_skip += 1; continue    # gap_cond don't-chase -> intentional skip
-                mult = m
-                improve_bps.append((1.0 - mult) * 1e4)   # +bp = cheaper entry than open
+                if not (MULT_LO <= m <= MULT_HI):
+                    n_glitch += 1                # bad print -> degrade to open baseline (mult 1.0)
+                else:
+                    mult = m
+                    improve_bps.append((1.0 - mult) * 1e4)   # +bp = cheaper entry than open
         entry_adj = float(oe) * mult
         ret = float(ox) / entry_adj - 1 - cost_bps / 1e4
         per_rebalance.setdefault(t["rebalance_step"], []).append(ret)
@@ -105,8 +113,9 @@ def simulate(scores, *, rule, top_k=5, period=5, k=0.01, g=0.03,
             "max_dd": dd, "win": float((pr > 0).mean()) if n else float("nan"),
             "n_periods": n, "n_trades": n_trades, "n_filled": n_filled,
             "n_unfillable": n_unfillable, "n_gap_skip": n_gap_skip,
-            "n_no_open": n_no_open, "n_fallback": n_fallback,
+            "n_no_open": n_no_open, "n_fallback": n_fallback, "n_glitch": n_glitch,
             "unfillable_pct": (n_unfillable / n_trades) if n_trades else 0.0,
             "fallback_pct": (n_fallback / n_trades) if n_trades else 0.0,
+            "glitch_pct": (n_glitch / n_trades) if n_trades else 0.0,
             "improve_bps_med": float(np.median(improve_bps)) if improve_bps else 0.0,
             "by_year": by_year}

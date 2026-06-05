@@ -71,6 +71,21 @@ def test_one_zi_limit_up_not_fillable():
     assert entry_multiplier(d, 10.0, "SH600000", rule="open") is None
 
 
+def test_vwap_ignores_zero_volume_glitch_bar():
+    # middle bar is a zero glitch (vol 0, amount 0) -> excluded from vwap
+    d = _day([10, 10, 10], [10, 10, 10], [10, 0, 10], [10, 0, 12], [100, 0, 100])
+    # amount = close*vol = [1000, 0, 1200]; valid bars (vol>0): vwap=(1000+1200)/200=11; open=10 -> 1.1
+    assert entry_multiplier(d, 9.8, "SH600000", rule="vwap") == pytest.approx(1.1)
+
+
+def test_first30_low_ignores_zero_low_glitch_bar():
+    # a glitched 0.0 low inside first 6 bars must NOT become the entry price
+    opens = [10, 10, 10, 10, 10, 10]; lows = [10, 9.9, 0.0, 9.8, 10, 10]
+    d = _day(opens, [11] * 6, lows, [10] * 6, [100] * 6)
+    # valid lows over first 6 = {10,9.9,9.8,10,10} -> min 9.8 -> mult 0.98 (not 0.0)
+    assert entry_multiplier(d, 9.9, "SH600000", rule="first30_low") == pytest.approx(0.98)
+
+
 def test_first_bar_zero_open_falls_back_to_close():
     # baostock data glitch: first 5min bar open=0 -> day-open proxy = first bar close=10.0
     d = _day([0, 10.1], [10.2, 10.2], [9.9, 10.0], [10.0, 10.1], [100, 100])

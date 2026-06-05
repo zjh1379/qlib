@@ -42,33 +42,43 @@ def entry_multiplier(day_bars: pd.DataFrame, prev_close: float, instrument: str,
         return None
     if not is_buy_fillable(day_bars, prev_close, instrument):
         return None
+    # day open: prefer the first bar's own open, then its close (09:35 price ~ open);
+    # baostock occasionally records the first bar's open as 0/NaN or emits sporadic
+    # zero-price glitch bars, so fall back to the first later positive open/close.
     o = float(day_bars["open"].iloc[0])
     if not (o > 0):
-        # baostock data glitch: first 5min bar's open is occasionally 0/NaN even
-        # when the stock traded all day -> use the first bar's close as day-open proxy.
         o = float(day_bars["close"].iloc[0])
     if not (o > 0):
+        pos_open = day_bars["open"][day_bars["open"] > 0]
+        o = float(pos_open.iloc[0]) if len(pos_open) else 0.0
+    if not (o > 0):
+        pos_close0 = day_bars["close"][day_bars["close"] > 0]
+        o = float(pos_close0.iloc[0]) if len(pos_close0) else 0.0
+    if not (o > 0):
         return None
-    close = float(day_bars["close"].iloc[-1])
+    pos_close = day_bars["close"][day_bars["close"] > 0]
+    close = float(pos_close.iloc[-1]) if len(pos_close) else o
     if rule == "open":
         price = o
-    elif rule == "vwap":
-        vol = float(day_bars["volume"].sum())
-        price = float(day_bars["amount"].sum()) / vol if vol > 0 else o
-    elif rule == "vwap_am":
-        am = day_bars[day_bars.index < len(day_bars) // 2] if len(day_bars) else day_bars
-        vol = float(am["volume"].sum())
-        price = float(am["amount"].sum()) / vol if vol > 0 else o
+    elif rule in ("vwap", "vwap_am"):
+        bars = day_bars.iloc[:max(1, len(day_bars) // 2)] if rule == "vwap_am" else day_bars
+        valid = bars[(bars["volume"] > 0) & (bars["amount"] > 0)]
+        vol = float(valid["volume"].sum())
+        price = float(valid["amount"].sum()) / vol if vol > 0 else o
     elif rule == "low_band":
+        pos_low = day_bars["low"][day_bars["low"] > 0]
+        day_low = float(pos_low.min()) if len(pos_low) else o
         band = o * (1 - k)
-        price = band if float(day_bars["low"].min()) <= band else close
+        price = band if day_low <= band else close
     elif rule == "gap_cond":
         gap = o / prev_close - 1 if prev_close > 0 else 0.0
         if gap >= g:
             return None                   # don't chase a gap-up
         price = o
     elif rule == "first30_low":
-        price = float(day_bars["low"].iloc[:first_n].min())
+        first = day_bars["low"].iloc[:first_n]
+        pos_first = first[first > 0]
+        price = float(pos_first.min()) if len(pos_first) else o
     else:
         raise ValueError(f"unknown rule {rule!r}")
-    return price / o
+    return price / o if o > 0 else None

@@ -63,7 +63,8 @@ def main() -> int:
     out = {}
     years = sorted({pd.Timestamp(d).year for d in dts.unique()})
     hdr = (f"{'rule':>16} {'cagr':>8} {'calmar':>7} {'maxdd':>8} {'win':>6} "
-           f"{'fill':>9} {'unfl%':>6} {'fbk%':>6} {'impbp':>7} " + " ".join(f"{y:>7}" for y in years))
+           f"{'fill':>9} {'unfl%':>6} {'fbk%':>6} {'glch%':>6} {'impbp':>7} "
+           + " ".join(f"{y:>7}" for y in years))
     print(hdr, flush=True)
     print("-" * len(hdr), flush=True)
     for rule, p in RULES:
@@ -75,7 +76,7 @@ def main() -> int:
         print(f"{tag:>16} {_pct(m['net_cagr']):>8} {m['calmar']:>7.2f} {_pct(m['max_dd']):>8} "
               f"{_pct(m['win']):>6} {m['n_filled']:>4}/{m['n_trades']:<4} "
               f"{m['unfillable_pct']*100:>5.1f} {m['fallback_pct']*100:>5.1f} "
-              f"{m['improve_bps_med']:>7.1f} "
+              f"{m['glitch_pct']*100:>5.1f} {m['improve_bps_med']:>7.1f} "
               + " ".join(f"{_pct(yr.get(y)):>7}" for y in years), flush=True)
 
     base = out["open"]["net_cagr"]
