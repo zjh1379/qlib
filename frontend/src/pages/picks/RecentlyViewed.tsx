@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { loadRecent } from './SymbolSearch';
+import { loadRecent } from '@/components/SymbolSearch';
 import { useInstruments } from '@/data/hooks';
 import { cn } from '@/lib/utils';
 

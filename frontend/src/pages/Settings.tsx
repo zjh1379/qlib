@@ -1,4 +1,4 @@
-import RetrainScheduleEditor from '@/components/RetrainScheduleEditor';
+import RetrainScheduleEditor from './settings/RetrainScheduleEditor';
 
 export default function Settings() {
   return (

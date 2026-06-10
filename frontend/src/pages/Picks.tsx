@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useCandidates } from '@/models/hooks';
 import { cn } from '@/lib/utils';
 
-import RecentlyViewed from '@/components/RecentlyViewed';
+import RecentlyViewed from './picks/RecentlyViewed';
 import { FilterBar } from './picks/FilterBar';
 import { applyFilters } from './picks/filter';
 import { applySort, DEFAULT_SORT, nextSort, SortKey, SortState } from './picks/sort';
