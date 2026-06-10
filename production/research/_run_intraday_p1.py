@@ -7,7 +7,7 @@ a chosen entry rule.
   rule!=open -> fetches baostock 5min (cached) per (name, entry_date).
 
 Run from the MAIN repo:
-  F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production._run_intraday_p1 --rule open
+  F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._run_intraday_p1 --rule open
 """
 import sys, sysconfig
 _P = sysconfig.get_paths().get("purelib")

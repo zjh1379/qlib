@@ -6,7 +6,7 @@ baostock session); every later rule is a cache hit. Resumable: the cache persist
 per fetch, so a re-run continues where it left off.
 
 Run from the MAIN repo:
-  F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production._run_intraday_sweep > logs/intraday_sweep.log 2>&1
+  F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._run_intraday_sweep > logs/intraday_sweep.log 2>&1
 """
 import sys, sysconfig
 _P = sysconfig.get_paths().get("purelib")

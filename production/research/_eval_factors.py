@@ -7,8 +7,8 @@ LGBM's Alpha158 thicken alpha? Compares, under the CANONICAL net-of-cost backtes
   C. both B variants WITH the P3 exposure overlay (ma60/band0.10)
 
 Run AFTER the factor backfill completes:
-  F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production._pool_fac
-  F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production._eval_factors > logs/eval_factors.log 2>&1
+  F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._pool_fac
+  F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_factors > logs/eval_factors.log 2>&1
 """
 import sys as _sys
 import sysconfig as _sysconfig

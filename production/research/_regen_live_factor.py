@@ -12,7 +12,7 @@ factor-LGBM per-horizon predictions trained today (run-once --features shortterm
 --end-date 2026-06-02), recompute score (-rank_avg over 1d+5d cols, v9) and
 consensus, and save to a NEW recorder 'ensemble_factor_2026-06-02'.
 
-Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production._regen_live_factor
+Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._regen_live_factor
 """
 import sys as _sys
 import sysconfig as _sysconfig

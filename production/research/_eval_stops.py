@@ -6,7 +6,7 @@ under the canonical fixed/hold-5/5d net-of-cost backtest (¥100k, small cost),
 both without and with the P3 exposure overlay.
 
 Run AFTER the factor OOF exists:
-  python -X utf8 -m production._eval_stops > logs/eval_stops.log 2>&1
+  python -X utf8 -m production.research._eval_stops > logs/eval_stops.log 2>&1
 """
 import sys as _sys
 import sysconfig as _sysconfig

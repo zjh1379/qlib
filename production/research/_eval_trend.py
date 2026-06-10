@@ -4,7 +4,7 @@ run a live falling-knife sanity check.
 
 Run from the repo root (NEVER `python file.py`):
 
-  F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production._eval_trend \
+  F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_trend \
       > logs/eval_trend.log 2>&1
 
 What it does

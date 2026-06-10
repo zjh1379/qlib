@@ -11,7 +11,7 @@ fixed/5-day backtest (¥100k, small cost) and asks, for each k:
 NOTE: at ¥100k the min ¥5 commission bites more as positions shrink (k up ->
 smaller positions), so cost_drag is reported — the NET answer includes it.
 
-Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production._eval_topk_sweep > logs/eval_topk_sweep.log 2>&1
+Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_topk_sweep > logs/eval_topk_sweep.log 2>&1
 """
 import sys as _sys
 import sysconfig as _sysconfig

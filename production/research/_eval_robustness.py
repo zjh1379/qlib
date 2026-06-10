@@ -9,7 +9,7 @@ small cost), reusing the same OOF score construction as _eval_factors:
       how much net CAGR / Calmar survives.
   (3) Per-year stability — net CAGR + net_ir by calendar year.
 
-Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production._eval_robustness > logs/eval_robustness.log 2>&1
+Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_robustness > logs/eval_robustness.log 2>&1
 """
 import sys as _sys
 import sysconfig as _sysconfig

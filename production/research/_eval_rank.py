@@ -4,8 +4,8 @@ baseline, under the canonical fixed/hold-5/5d net-of-cost backtest. Reports
 full + ex-2020 metrics, per-year, and paired daily-net t-tests.
 
 Run AFTER the rank backfill + pooling:
-  python -m production._pool_rank
-  python -X utf8 -m production._eval_rank > logs/eval_rank.log 2>&1
+  python -m production.research._pool_rank
+  python -X utf8 -m production.research._eval_rank > logs/eval_rank.log 2>&1
 """
 import sys as _sys
 import sysconfig as _sysconfig
@@ -41,7 +41,7 @@ def main() -> int:
             print(f"MISSING {p} — run the rank backfill + _pool_rank first."); return 1
 
     from production.score_utils import score_of as _score_of, rebuild_2model as _rebuild_2model
-    from production._eval_robustness import _paired_t, _calmar
+    from production.research._eval_robustness import _paired_t, _calmar
     from production.backtest.metrics_net import net_metrics
     from production.backtest.engine import run_backtest
     from production.backtest.rebalance import FixedPeriod
