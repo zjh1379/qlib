@@ -44,9 +44,46 @@ def _make_policy(name: str, top_k: int, period: int, exit_k: int):
     raise ValueError(f"unknown policy {name!r}")
 
 
-def build_report(scores: pd.Series, fwd_ret: pd.Series, *, policy_name: str,
-                 top_k: int, period: int, exit_k: int, capital: float,
-                 profile: str, exposure=None) -> dict:
+def _exposure_from_regime(scores: pd.Series, regime: dict, config_path: str):
+    """Load the market proxy for `scores`' span and compute an exposure Series from a
+    regime spec dict, e.g. {"method":"trend_ma","ma_window":60,"band":0.10}. Centralizes
+    the load_market_proxy + compute_exposure wiring that callers used to repeat."""
+    from .market import load_market_proxy
+    from .regime import compute_exposure
+    instruments = sorted(scores.index.get_level_values("instrument").unique())
+    dates = scores.index.get_level_values("datetime")
+    mkt = load_market_proxy(instruments, str(dates.min().date()),
+                            str(dates.max().date()), config_path=config_path)
+    method = regime.get("method", "trend_ma")
+    exp = compute_exposure(mkt, method=method, ma_window=regime.get("ma_window", 120),
+                           band=regime.get("band", 0.10),
+                           min_exposure=regime.get("min_exposure", 0.0),
+                           vol_target=regime.get("vol_target"))
+    return exp.rename(regime.get("name") or f"{method}{regime.get('ma_window', 120)}")
+
+
+def build_report(scores: pd.Series, fwd_ret: pd.Series | None = None, *,
+                 policy_name: str, top_k: int, period: int, exit_k: int,
+                 capital: float, profile: str, exposure=None,
+                 regime: dict | None = None,
+                 config_path: str = "production/configs/rolling_ensemble.yaml") -> dict:
+    """Run the canonical net-of-cost backtest and return a scorecard dict.
+
+    Deep entry point that hides the whole ritual:
+      - `fwd_ret` is loaded from qlib for the scores' span if omitted;
+      - `regime` (e.g. {"method":"trend_ma","ma_window":60,"band":0.10}) computes the
+        exposure overlay internally when `exposure` is not passed.
+    So a caller can go from the 6-step load_fwd/load_market/compute_exposure/policy/
+    engine/metrics wiring to a single call. Passing `fwd_ret`/`exposure` explicitly
+    still works (back-compatible)."""
+    if fwd_ret is None:
+        from .data import load_fwd_returns
+        instruments = sorted(scores.index.get_level_values("instrument").unique())
+        dates = scores.index.get_level_values("datetime")
+        fwd_ret = load_fwd_returns(instruments, str(dates.min().date()),
+                                   str(dates.max().date()), config_path=config_path)
+    if exposure is None and regime:
+        exposure = _exposure_from_regime(scores, regime, config_path)
     policy = _make_policy(policy_name, top_k, period, exit_k)
     cm = cost_model(profile)
     res = run_backtest(scores, fwd_ret, policy, cm, capital=capital, exposure=exposure)
@@ -91,25 +128,15 @@ def main() -> int:
         sector = load_sector_map(args.industry_map)
         scores = _neutralize(scores, sector=sector)
 
-    instruments = sorted(scores.index.get_level_values("instrument").unique())
-    dates = scores.index.get_level_values("datetime")
-    start, end = str(dates.min().date()), str(dates.max().date())
-
-    from .data import load_fwd_returns
-    fwd = load_fwd_returns(instruments, start, end, config_path=args.config)
-
-    exposure = None
+    regime = None
     if args.regime != "none":
-        from .market import load_market_proxy
-        from .regime import compute_exposure
-        mkt = load_market_proxy(instruments, start, end, config_path=args.config)
-        exposure = compute_exposure(mkt, method=args.regime, ma_window=args.ma_window,
-                                    band=args.band, min_exposure=args.min_exposure,
-                                    vol_target=args.vol_target)
+        regime = {"method": args.regime, "ma_window": args.ma_window, "band": args.band,
+                  "min_exposure": args.min_exposure, "vol_target": args.vol_target}
 
-    rep = build_report(scores, fwd, policy_name=args.policy, top_k=args.top_k,
+    # build_report loads fwd returns + computes the regime exposure internally.
+    rep = build_report(scores, policy_name=args.policy, top_k=args.top_k,
                        period=args.period, exit_k=args.exit_k, capital=args.capital,
-                       profile=args.profile, exposure=exposure)
+                       profile=args.profile, regime=regime, config_path=args.config)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(rep, indent=2, ensure_ascii=False), encoding="utf-8")
