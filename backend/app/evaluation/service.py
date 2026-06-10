@@ -12,7 +12,12 @@ from pathlib import Path
 import pandas as pd
 
 from app.core.config import Settings
-from app.core.qlib_adapter import init_qlib_once
+from app.core.qlib_adapter import (
+    init_qlib_once,
+    list_recorder_infos,
+    get_recorder_run_name,
+    fetch_open_to_open_labels,
+)
 from app.evaluation.schemas import RecorderSummary
 
 # Add the repo root so we can import production.metrics / production.validate_acceptance
@@ -25,7 +30,6 @@ def list_recorders_with_summary() -> list[RecorderSummary]:
     """Enumerate all qlib recorders across all experiments and return a
     lightweight summary for each. Cheap — does NOT load pred.pkl."""
     init_qlib_once()
-    from qlib.workflow import R
 
     out: list[RecorderSummary] = []
     # List experiments (excludes the deleted-trash sentinel)
@@ -34,12 +38,9 @@ def list_recorders_with_summary() -> list[RecorderSummary]:
         exp_name = _experiment_name(exp_id)
         if exp_name in (None, "Default"):
             continue
-        try:
-            recs = R.list_recorders(experiment_name=exp_name)
-        except Exception:
-            continue
-        for rec_id, rec in recs.items():
-            info = rec.info or {}
+        # list_recorder_infos returns {} for a missing/unreadable experiment,
+        # so the loop simply skips it (replaces the old try/except continue).
+        for rec_id, info in list_recorder_infos(exp_name).items():
             run_name = info.get("name", rec_id[:8])
             created_at = _format_created_at(info.get("start_time"))
             # Stat pred.pkl size cheaply (without loading the dataframe)
@@ -152,9 +153,6 @@ def _find_exp_id_for_name(exp_name: str) -> str | None:
 
 import functools
 from datetime import datetime, timezone
-
-from qlib.workflow import R as _R
-from qlib.data import D as _D
 
 from app.evaluation.schemas import (
     AcceptanceResult,
@@ -293,8 +291,7 @@ def _evaluate_cached(recorder_id: str, top_k: int, cost_bps: float) -> EvalResul
     window_start = str(joined_dates.min().date()) if len(joined_dates) else ""
     window_end = str(joined_dates.max().date()) if len(joined_dates) else ""
 
-    rec = _R.get_recorder(recorder_id=recorder_id, experiment_name=exp_name)
-    run_name = rec.info.get("name", recorder_id[:8])
+    run_name = get_recorder_run_name(recorder_id, exp_name)
 
     return EvalResult(
         recorder_id=recorder_id,
@@ -355,19 +352,7 @@ def _fetch_open_to_open_labels(pred: pd.Series) -> pd.Series:
     dates = pred.index.get_level_values("datetime")
     start = (pd.Timestamp(dates.min()) - pd.Timedelta(days=5)).date()
     end = (pd.Timestamp(dates.max()) + pd.Timedelta(days=10)).date()
-    df = _D.features(
-        instruments=symbols,
-        fields=["Ref($open, -2) / Ref($open, -1) - 1"],
-        start_time=str(start),
-        end_time=str(end),
-    )
-    df.columns = ["y"]
-    s = df["y"]
-    if s.index.names != ["datetime", "instrument"]:
-        # qlib usually returns (instrument, datetime); normalize.
-        s.index.names = ["instrument", "datetime"]
-        s = s.swaplevel().sort_index()
-    return s
+    return fetch_open_to_open_labels(symbols, str(start), str(end))
 
 
 def _overlapping_regimes(pred: pd.Series) -> list[tuple[str, str, str]]:
@@ -402,6 +387,12 @@ def _cache_quick_look(recorder_id: str) -> tuple[float | None, float | None, boo
     if res is None:
         return (None, None, None)
     return (res.scorecard.ic_mean, res.scorecard.ir, res.acceptance.passed)
+
+
+def get_cached_result(recorder_id: str) -> "EvalResult | None":
+    """Cached EvalResult for a recorder, or None if not yet evaluated. Encapsulates
+    _CACHE_RESULTS so the router doesn't reach into module internals."""
+    return _CACHE_RESULTS.get(recorder_id)
 
 
 def compare_recorders(

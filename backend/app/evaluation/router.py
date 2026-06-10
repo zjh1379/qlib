@@ -43,8 +43,7 @@ def run_evaluation(payload: EvalRunRequest):
 @router.get("/results/{recorder_id}", response_model=EvalResult)
 def get_result(recorder_id: str):
     """Return the cached eval result for a recorder. 404 if never evaluated."""
-    from app.evaluation.service import _CACHE_RESULTS
-    cached = _CACHE_RESULTS.get(recorder_id)
+    cached = service.get_cached_result(recorder_id)
     if cached is None:
         raise HTTPException(status_code=404, detail=f"recorder {recorder_id} has no cached eval")
     return cached

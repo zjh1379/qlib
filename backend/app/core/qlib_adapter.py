@@ -399,3 +399,47 @@ def load_pred(
     if series_only and isinstance(pred, pd.DataFrame):
         pred = pred["score"]
     return pred
+
+
+def list_recorder_infos(experiment_name: str) -> dict[str, dict]:
+    """Return {recorder_id: info_dict} for an experiment's recorders (info carries
+    'name'/'start_time'). Empty dict if the experiment is missing/unreadable —
+    callers iterate and skip, so a bad experiment is simply absent."""
+    init_qlib_once()
+    try:
+        recs = R.list_recorders(experiment_name=experiment_name)
+    except Exception:
+        return {}
+    return {rid: (rec.info or {}) for rid, rec in recs.items()}
+
+
+def get_recorder_run_name(recorder_id: str, experiment_name: str) -> str:
+    """Recorder's human run name (info['name']), falling back to the id prefix."""
+    init_qlib_once()
+    try:
+        rec = R.get_recorder(recorder_id=recorder_id, experiment_name=experiment_name)
+        return rec.info.get("name", recorder_id[:8])
+    except Exception:
+        return recorder_id[:8]
+
+
+def fetch_open_to_open_labels(symbols: list[str], start: str, end: str) -> pd.Series:
+    """Open-to-open forward label `Ref($open,-2)/Ref($open,-1)-1` per
+    (datetime, instrument) — the label the eval scorecard joins against pred.
+    Normalizes qlib's native (instrument, datetime) index to (datetime, instrument).
+    Returns an empty Series named 'y' if qlib yields nothing."""
+    init_qlib_once()
+    df = D.features(
+        instruments=symbols,
+        fields=["Ref($open, -2) / Ref($open, -1) - 1"],
+        start_time=start,
+        end_time=end,
+    )
+    if df is None or df.empty:
+        return pd.Series(dtype="float64", name="y")
+    df.columns = ["y"]
+    s = df["y"]
+    if list(s.index.names) != ["datetime", "instrument"]:
+        s.index = s.index.set_names(["instrument", "datetime"])
+        s = s.swaplevel().sort_index()
+    return s
