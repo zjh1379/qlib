@@ -51,7 +51,7 @@ def _pct(x):
 
 def main() -> int:
     Path("logs").mkdir(exist_ok=True)
-    from production._eval_factors import _rebuild_2model
+    from production.score_utils import rebuild_2model as _rebuild_2model
     from production.intraday.exec_backtest import simulate
 
     fac = pd.read_pickle(OOF_FAC); two = pd.read_pickle(OOF_2MODEL)

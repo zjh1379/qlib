@@ -40,7 +40,7 @@ def _calmar(m):
 
 def main() -> int:
     Path("logs").mkdir(exist_ok=True)
-    from production._eval_factors import _rebuild_2model
+    from production.score_utils import rebuild_2model as _rebuild_2model
     from production.backtest.metrics_net import net_metrics
     from production.backtest.engine import run_backtest
     from production.backtest.rebalance import FixedPeriod

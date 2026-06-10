@@ -26,6 +26,9 @@ import json
 import numpy as np
 import pandas as pd
 
+from production.score_utils import (
+    score_of as _score_of, rebuild_2model as _rebuild_2model, calmar as _calmar)
+
 OOF_FAC = "production/reports/oof_lgbmfac_2021_2026.pkl"     # factor LGBM (pooled)
 OOF_LGBM = "production/reports/oof_lgbm_2021_2026.pkl"       # baseline LGBM
 OOF_2MODEL = "production/reports/oof_2model_2021_2026.pkl"   # baseline LGBM+ALSTM (=+19%)
@@ -35,43 +38,12 @@ TOP_K, PERIOD, CAPITAL, PROFILE = 5, 5, 100_000.0, "small"
 OVERLAY_MA, OVERLAY_BAND = 60, 0.10
 
 
-def _calmar(m):
-    dd, cagr = m.get("max_drawdown"), m.get("net_cagr")
-    if dd is None or not np.isfinite(dd) or abs(dd) < 1e-12:
-        return float("nan")
-    return cagr / abs(dd)
-
-
 def _fmt_pct(x):
     return "n/a" if x is None or not np.isfinite(x) else f"{x:+7.2%}"
 
 
 def _fmt_num(x, nd=2):
     return "n/a" if x is None or not np.isfinite(x) else f"{x:.{nd}f}"
-
-
-def _score_of(df):
-    if isinstance(df, pd.Series):
-        s = df
-    else:
-        s = df["score"] if "score" in df.columns else df.iloc[:, 0]
-    s = s.copy()
-    s.index = s.index.set_names(["datetime", "instrument"])
-    return s.rename("score").dropna()
-
-
-def _rebuild_2model(lgbm_df: pd.DataFrame, two_df: pd.DataFrame) -> pd.Series:
-    """Rebuild the canonical ensemble score from a given LGBM's 1d/5d/20d columns
-    + the baseline ALSTM 1d/5d/20d columns, via assemble_score (the production
-    -mean(rank over non-_20d cols) blend). Lets us swap in factor-LGBM while
-    keeping the same ALSTM, for an apples-to-apples 2-model comparison."""
-    from production.backfill_pool import assemble_score
-    lg = lgbm_df[[c for c in lgbm_df.columns if c.startswith("lgbm_")]]
-    al = two_df[[c for c in two_df.columns if c.startswith("alstm_")]]
-    base = pd.concat([lg, al], axis=1).sort_index()
-    base.index = base.index.set_names(["datetime", "instrument"])
-    scored = assemble_score(base)
-    return _score_of(scored)
 
 
 def _run(name, scores, fwd, exposure, regimes_out):

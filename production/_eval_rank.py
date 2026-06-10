@@ -40,7 +40,7 @@ def main() -> int:
         if not Path(p).exists():
             print(f"MISSING {p} — run the rank backfill + _pool_rank first."); return 1
 
-    from production._eval_factors import _score_of, _rebuild_2model
+    from production.score_utils import score_of as _score_of, rebuild_2model as _rebuild_2model
     from production._eval_robustness import _paired_t, _calmar
     from production.backtest.metrics_net import net_metrics
     from production.backtest.engine import run_backtest

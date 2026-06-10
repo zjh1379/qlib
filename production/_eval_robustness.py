@@ -92,7 +92,7 @@ def main() -> int:
         if not Path(p).exists():
             print(f"MISSING {p}"); return 1
 
-    from production._eval_factors import _score_of, _rebuild_2model
+    from production.score_utils import score_of as _score_of, rebuild_2model as _rebuild_2model
     fac = pd.read_pickle(OOF_FAC)
     lgbm = pd.read_pickle(OOF_LGBM)
     two = pd.read_pickle(OOF_2MODEL)

@@ -75,7 +75,7 @@ def _paired_t(a, b):
 
 def main() -> int:
     Path("logs").mkdir(exist_ok=True)
-    from production._eval_factors import _score_of, _rebuild_2model
+    from production.score_utils import score_of as _score_of, rebuild_2model as _rebuild_2model
     from production.backtest.metrics_net import net_metrics
     fac = pd.read_pickle(OOF_FAC)
     two = pd.read_pickle(OOF_2MODEL)
