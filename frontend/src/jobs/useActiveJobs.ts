@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { api } from '@/api/client';
+import { useJobPolling } from './useJobPolling';
 
 export type ActiveJobKind = 'refresh' | 'retrain' | 'evaluation' | 'inference';
 
@@ -30,34 +30,11 @@ export function useActiveJobs(): ActiveJob[] {
   const slowMs = 30_000;
   const interval = hasActive ? fastMs : slowMs;
 
-  const { data: refresh } = useQuery({
-    queryKey: ['jobs', 'refresh', 'active'],
-    queryFn: () => api.data.refreshActive(),
-    staleTime: interval / 2,
-    refetchInterval: interval,
-    refetchIntervalInBackground: true,
-  });
-  const { data: retrain } = useQuery({
-    queryKey: ['jobs', 'retrain', 'active'],
-    queryFn: () => api.data.retrainActive(),
-    staleTime: interval / 2,
-    refetchInterval: interval,
-    refetchIntervalInBackground: true,
-  });
-  const { data: evals } = useQuery({
-    queryKey: ['jobs', 'evaluation', 'active'],
-    queryFn: () => api.data.evalActive(),
-    staleTime: interval / 2,
-    refetchInterval: interval,
-    refetchIntervalInBackground: true,
-  });
-  const { data: inference } = useQuery({
-    queryKey: ['jobs', 'inference', 'active'],
-    queryFn: () => api.inference.active(),
-    staleTime: interval / 2,
-    refetchInterval: interval,
-    refetchIntervalInBackground: true,
-  });
+  // One shared adaptive cadence; each job polls via the same useJobPolling hook.
+  const refresh = useJobPolling('refresh', () => api.data.refreshActive(), interval);
+  const retrain = useJobPolling('retrain', () => api.data.retrainActive(), interval);
+  const evals = useJobPolling('evaluation', () => api.data.evalActive(), interval);
+  const inference = useJobPolling('inference', () => api.inference.active(), interval);
 
   // Watch for any running job and bump polling to fast.
   useEffect(() => {
