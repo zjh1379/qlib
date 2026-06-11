@@ -30,6 +30,8 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 
+import urllib.request
+
 import numpy as np
 import pandas as pd
 
@@ -47,6 +49,7 @@ HORIZONS = ("1d", "5d", "20d")
 MODELS = ("lgbm", "alstm", "tra")
 CACHE_PATH = REPO_ROOT / "production" / "cache" / "latest_calibration.pkl"
 INVALIDATE_URL = "http://127.0.0.1:8000/api/internal/cache/invalidate"
+ANALYSIS_REFRESH_URL = "http://127.0.0.1:8000/api/internal/analysis/refresh"
 
 
 # ---- helpers (pure, easy to test) -----------------------------------------
@@ -259,6 +262,17 @@ def _post_invalidate_cache():
         log.warning("cache_invalidate_failed: %s — backend may be down", exc)
 
 
+def _post_analysis_refresh():
+    """Best-effort: ask the backend to (re)generate AI analysis for the top-N picks.
+    No-op server-side when ai_analysis_enabled is false / no key."""
+    try:
+        req = urllib.request.Request(ANALYSIS_REFRESH_URL, method="POST")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            log.info("analysis_refresh status=%d", r.status)
+    except Exception as exc:
+        log.warning("analysis_refresh_failed: %s — backend may be down", exc)
+
+
 def run(end_date: date | None = None, force: bool = False,
         experiment: str = "rolling_v2_ensemble") -> int:
     """Main pipeline. Returns exit code (0=success)."""
@@ -372,6 +386,7 @@ def run(end_date: date | None = None, force: bool = False,
              len(enriched), len(combined), len(missing))
 
     _post_invalidate_cache()
+    _post_analysis_refresh()
     return 0
 
 
