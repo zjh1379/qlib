@@ -1,4 +1,5 @@
 import type { paths } from '@/api/types.gen';
+import type { AiAnalysis, AnalysisJob, AnalysisStatus } from '@/analysis/types';
 
 const BASE = ''; // empty in production (same origin); Vite proxy handles /api in dev
 
@@ -313,6 +314,14 @@ export const api = {
         new_rows: number | null;
         reason: string | null;
       }>(`/api/inference/jobs/${encodeURIComponent(jobId)}`),
+  },
+  analysis: {
+    active: () => request<AnalysisJob | null>('/api/analysis/active/peek'),
+    status: () => request<AnalysisStatus>('/api/analysis/status'),
+    runNow: () =>
+      request<{ status: string; job_id: string | null }>('/api/analysis/run-now', { method: 'POST' }),
+    forSymbol: (symbol: string) =>
+      request<AiAnalysis | null>(`/api/analysis/${encodeURIComponent(symbol)}`),
   },
   scheduling: {
     getRetrain: () => {

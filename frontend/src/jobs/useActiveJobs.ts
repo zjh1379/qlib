@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/api/client';
 import { useJobPolling } from './useJobPolling';
 
-export type ActiveJobKind = 'refresh' | 'retrain' | 'evaluation' | 'inference';
+export type ActiveJobKind = 'refresh' | 'retrain' | 'evaluation' | 'inference' | 'analysis';
 
 export interface ActiveJob {
   kind: ActiveJobKind;
@@ -35,6 +35,7 @@ export function useActiveJobs(): ActiveJob[] {
   const retrain = useJobPolling('retrain', () => api.data.retrainActive(), interval);
   const evals = useJobPolling('evaluation', () => api.data.evalActive(), interval);
   const inference = useJobPolling('inference', () => api.inference.active(), interval);
+  const analysis = useJobPolling('analysis', () => api.analysis.active(), interval);
 
   // Watch for any running job and bump polling to fast.
   useEffect(() => {
@@ -42,10 +43,11 @@ export function useActiveJobs(): ActiveJob[] {
       (refresh?.status === 'running') ||
       (retrain?.status === 'pending' || retrain?.status === 'running') ||
       (Array.isArray(evals) && evals.length > 0) ||
-      (inference?.status === 'running')
+      (inference?.status === 'running') ||
+      (analysis?.status === 'running')
     );
     if (running !== hasActive) setHasActive(!!running);
-  }, [refresh, retrain, evals, inference, hasActive]);
+  }, [refresh, retrain, evals, inference, analysis, hasActive]);
 
   const out: ActiveJob[] = [];
 
@@ -123,6 +125,27 @@ export function useActiveJobs(): ActiveJob[] {
             : inference.end_date ?? undefined,
         status,
         started_at: inference.started_at,
+        href: '/picks',
+      });
+    }
+  }
+
+  if (analysis) {
+    const status = analysis.status as ActiveJob['status'];
+    const recent =
+      analysis.started_at && Date.now() - new Date(analysis.started_at).getTime() < 60_000;
+    if (status === 'running' || (recent && (status === 'done' || status === 'failed'))) {
+      out.push({
+        kind: 'analysis',
+        label:
+          status === 'running'
+            ? 'AI 解读'
+            : status === 'done'
+              ? '✓ 解读完成'
+              : '✗ 解读失败',
+        detail: analysis.analyzed != null ? `${analysis.analyzed} 只` : undefined,
+        status,
+        started_at: analysis.started_at,
         href: '/picks',
       });
     }

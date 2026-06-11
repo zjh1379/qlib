@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 
 import { useCandidates } from '@/models/hooks';
 import { cn } from '@/lib/utils';
+import { api } from '@/api/client';
 
 import RecentlyViewed from './picks/RecentlyViewed';
 import { FilterBar } from './picks/FilterBar';
@@ -11,12 +13,15 @@ import { applySort, DEFAULT_SORT, nextSort, SortKey, SortState } from './picks/s
 import HorizonMiniBar from './picks/HorizonMiniBar';
 import StalenessBanner from './picks/StalenessBanner';
 import TopInfoRow from './picks/TopInfoRow';
+import RiskFlagBadge from './picks/RiskFlagBadge';
+import AiNotePanel from './picks/AiNotePanel';
 import type { FilterParams } from './picks/types';
 import { useFilterParams } from './picks/useFilterParams';
 
 import type { components } from '@/api/types.gen';
+import type { AiAnalysis } from '@/analysis/types';
 
-type Candidate = components['schemas']['ScreenItem'];
+type Candidate = components['schemas']['ScreenItem'] & { ai_analysis?: AiAnalysis | null };
 
 type HorizonId = '1d' | '5d' | '20d';
 
@@ -29,6 +34,20 @@ const MIN_TOP = 0;
 export default function Picks() {
   const [params, update, reset] = useFilterParams();
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
+
+  const qc = useQueryClient();
+  const { data: aiJob } = useQuery({
+    queryKey: ['analysis', 'active'],
+    queryFn: () => api.analysis.active(),
+    refetchInterval: 5000,
+  });
+  const prevAiStatus = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevAiStatus.current === 'running' && aiJob?.status === 'done') {
+      qc.invalidateQueries({ queryKey: ['models', 'candidates'] });
+    }
+    prevAiStatus.current = aiJob?.status ?? null;
+  }, [aiJob?.status, qc]);
 
   // Single backend call per session (per view). Filter changes do NOT re-fetch.
   const { data, isPending, isFetching, error } = useCandidates({
@@ -164,6 +183,7 @@ interface ResultsTableProps {
 }
 
 function ResultsTable({ items, sort, onSort, maxAbsByHorizon }: ResultsTableProps) {
+  const [expanded, setExpanded] = useState<string | null>(null);
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -178,42 +198,67 @@ function ResultsTable({ items, sort, onSort, maxAbsByHorizon }: ResultsTableProp
             <SortableTh label="单价 ¥" sortKey="last_price" sort={sort} onSort={onSort} align="right" />
             <SortableTh label="涨跌5d" sortKey="pct_change_5d" sort={sort} onSort={onSort} align="right" />
             <th className="py-2 pr-4">板块</th>
+            <th className="py-2 pr-4">AI</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item) => (
-            <tr key={item.symbol} className="border-b border-[#21262d] hover:bg-[#161b22] transition">
-              <td className="py-2 pr-4 font-mono text-[#8b949e]">{item.rank}</td>
-              <td className="py-2 pr-4">
-                <Link to={`/charts/${item.symbol}`} className="font-mono text-[#58a6ff] hover:underline">{item.symbol}</Link>
-              </td>
-              <td className="py-2 pr-4">
-                <Link to={`/charts/${item.symbol}`} className="hover:underline">{item.name}</Link>
-              </td>
-              {(['1d', '5d', '20d'] as const).map((h) => (
-                <td key={h} className="py-2 pr-3">
-                  {item.horizons?.[h] ? (
-                    <HorizonMiniBar
-                      horizon={h}
-                      predReturn={item.horizons[h].pred_return ?? null}
-                      percentile={item.horizons[h].percentile}
-                      modelAgreement={item.horizons[h].model_agreement ?? null}
-                      maxAbsReturn={maxAbsByHorizon[h]}
-                      isPrimary={h === '5d'}
-                    />
+            <Fragment key={item.symbol}>
+              <tr className="border-b border-[#21262d] hover:bg-[#161b22] transition">
+                <td className="py-2 pr-4 font-mono text-[#8b949e]">{item.rank}</td>
+                <td className="py-2 pr-4">
+                  <Link to={`/charts/${item.symbol}`} className="font-mono text-[#58a6ff] hover:underline">{item.symbol}</Link>
+                </td>
+                <td className="py-2 pr-4">
+                  <Link to={`/charts/${item.symbol}`} className="hover:underline">{item.name}</Link>
+                </td>
+                {(['1d', '5d', '20d'] as const).map((h) => (
+                  <td key={h} className="py-2 pr-3">
+                    {item.horizons?.[h] ? (
+                      <HorizonMiniBar
+                        horizon={h}
+                        predReturn={item.horizons[h].pred_return ?? null}
+                        percentile={item.horizons[h].percentile}
+                        modelAgreement={item.horizons[h].model_agreement ?? null}
+                        maxAbsReturn={maxAbsByHorizon[h]}
+                        isPrimary={h === '5d'}
+                      />
+                    ) : (
+                      <span className="text-[#6e7681] text-xs">—</span>
+                    )}
+                  </td>
+                ))}
+                <td className="py-2 pr-4 text-right font-mono text-[#e6edf3]">
+                  {item.last_price != null ? item.last_price.toFixed(2) : '—'}
+                </td>
+                <td className={cn('py-2 pr-4 text-right font-mono', pctColorClass(item.pct_change_5d))}>
+                  {item.pct_change_5d != null ? formatPct(item.pct_change_5d) : '—'}
+                </td>
+                <td className="py-2 pr-4 text-[#8b949e]">{labelBoard(item.board)}</td>
+                <td className="py-2 pr-4">
+                  {item.ai_analysis ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <RiskFlagBadge analysis={item.ai_analysis} />
+                      <button
+                        className="text-[#58a6ff] text-xs hover:underline"
+                        onClick={() => setExpanded(expanded === item.symbol ? null : item.symbol)}
+                      >
+                        {expanded === item.symbol ? '收起' : '解读'}
+                      </button>
+                    </span>
                   ) : (
                     <span className="text-[#6e7681] text-xs">—</span>
                   )}
                 </td>
-              ))}
-              <td className="py-2 pr-4 text-right font-mono text-[#e6edf3]">
-                {item.last_price != null ? item.last_price.toFixed(2) : '—'}
-              </td>
-              <td className={cn('py-2 pr-4 text-right font-mono', pctColorClass(item.pct_change_5d))}>
-                {item.pct_change_5d != null ? formatPct(item.pct_change_5d) : '—'}
-              </td>
-              <td className="py-2 pr-4 text-[#8b949e]">{labelBoard(item.board)}</td>
-            </tr>
+              </tr>
+              {expanded === item.symbol && (
+                <tr className="border-b border-[#21262d] bg-[#0d1117]">
+                  <td colSpan={10} className="py-3 px-4">
+                    <AiNotePanel analysis={item.ai_analysis} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>
