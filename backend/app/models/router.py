@@ -1,6 +1,9 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import get_session
 from app.core.exceptions import BusinessError
+from app.analysis.store import fetch_analyses
 from app.models import service
 from app.models.schemas import (
     CandidatesResponse,
@@ -90,7 +93,7 @@ def rollback(payload: RollbackRequest):
 
 
 @router.get("/candidates", response_model=CandidatesResponse)
-def candidates_endpoint(
+async def candidates_endpoint(
     top: int = Query(default=300, ge=1, le=500),
     days: int = Query(default=5, ge=1, le=60),
     min_top: int = Query(default=0, ge=0),
@@ -105,11 +108,22 @@ def candidates_endpoint(
             "the pool-time default score (e.g. v9 = 1d+5d cols)."
         ),
     ),
+    session: AsyncSession = Depends(get_session),
 ):
     """Return the full candidate pool (cached per recorder + view + models + base params).
     Frontend fetches this ONCE, then applies filter + sort client-side. No filter
-    query params here — Tier 1 filters apply in the browser."""
-    return service.candidates(
+    query params here — Tier 1 filters apply in the browser.
+    AI analysis (interpretation + risk flags) is LEFT-JOINed from the store at
+    serving time so cached ScreenItem objects are never mutated."""
+    result = service.candidates(
         top=top, days=days, min_top=min_top, experiment=experiment,
         view=view, models=models,
     )
+    items = result["items"]
+    as_of = result.get("as_of_date") or result.get("latest_date") or ""
+    analyses = await fetch_analyses(session, [it.symbol for it in items], as_of)
+    if analyses:
+        result["items"] = [
+            it.model_copy(update={"ai_analysis": analyses.get(it.symbol)}) for it in items
+        ]
+    return result

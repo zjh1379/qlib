@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from app.analysis.schemas import AiAnalysis
+
 
 class HorizonPrediction(BaseModel):
     """Per-(stock, horizon) prediction packet.
@@ -45,6 +47,9 @@ class ScreenItem(BaseModel):
     is_new_high_120d: bool = False
     board: str | None = None  # main | gem | star | bj | etf | other
     is_st: bool = False
+
+    # AI 分析层 (解读 + 风险旗标) — attached at serving time, None when not yet generated
+    ai_analysis: AiAnalysis | None = None
 
 
 class ScreenResponse(BaseModel):
