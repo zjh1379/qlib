@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # AI analysis layer (解读 + 风险旗标)
     anthropic_api_key: str = ""           # QLIB_COMPANION_ANTHROPIC_API_KEY (env only, not committed)
-    ai_model: str = "claude-opus-4-8"     # cost lever: set to claude-sonnet-4-6 to cut ~40%
+    ai_model: str = "claude-sonnet-4-6"   # spec default (summarize+extract, ~pennies/day); set claude-opus-4-8 for sharper judgment
     ai_analysis_top_n: int = 10           # analyze the top-N picks per run
     ai_analysis_enabled: bool = False     # off until a key is set
 
