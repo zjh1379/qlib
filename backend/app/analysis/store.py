@@ -46,13 +46,23 @@ async def fetch_analyses(
     """Read non-failed analyses for these symbols at as_of_date. Keyed by symbol."""
     if not symbols or not as_of_date:
         return {}
-    res = await session.execute(
-        select(AiAnalysisORM).where(
-            AiAnalysisORM.symbol.in_(symbols),
-            AiAnalysisORM.as_of_date == as_of_date,
-            AiAnalysisORM.status != "failed",
+    try:
+        res = await session.execute(
+            select(AiAnalysisORM).where(
+                AiAnalysisORM.symbol.in_(symbols),
+                AiAnalysisORM.as_of_date == as_of_date,
+                AiAnalysisORM.status != "failed",
+            )
         )
-    )
+    except Exception as exc:
+        # AI analysis is optional decision-support; never let it break the core
+        # candidates view (e.g. ai_analysis table not migrated yet).
+        log.warning("fetch_analyses query failed, returning empty: %s", exc)
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        return {}
     out: dict[str, AiAnalysis] = {}
     for row in res.scalars().all():
         try:

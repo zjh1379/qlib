@@ -58,3 +58,15 @@ async def test_fetch_empty_inputs(tmp_path):
         assert await store.fetch_analyses(s, [], "2026-06-10") == {}
         assert await store.fetch_analyses(s, ["SH600519"], "") == {}
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_fetch_analyses_missing_table_returns_empty(tmp_path):
+    # Table NOT created (no create_all) — simulates pre-migration environment.
+    db = tmp_path / "app.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db}")
+    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as s:
+        got = await store.fetch_analyses(s, ["SH600519"], "2026-06-10")
+    assert got == {}   # degrades gracefully instead of raising
+    await engine.dispose()
