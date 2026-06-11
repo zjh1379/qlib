@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     retrain_recorder_experiment: str = "rolling_v2_ensemble"
     retrain_python_path: str = "F:/Tools/Anaconda/envs/qlib/python.exe"
 
+    # AI analysis layer (解读 + 风险旗标)
+    anthropic_api_key: str = ""           # QLIB_COMPANION_ANTHROPIC_API_KEY (env only, not committed)
+    ai_model: str = "claude-opus-4-8"     # cost lever: set to claude-sonnet-4-6 to cut ~40%
+    ai_analysis_top_n: int = 10           # analyze the top-N picks per run
+    ai_analysis_enabled: bool = False     # off until a key is set
+
     @property
     def db_url(self) -> str:
         path = Path(self.app_db_path).expanduser().resolve()
