@@ -114,16 +114,19 @@ async def candidates_endpoint(
     Frontend fetches this ONCE, then applies filter + sort client-side. No filter
     query params here — Tier 1 filters apply in the browser.
     AI analysis (interpretation + risk flags) is LEFT-JOINed from the store at
-    serving time so cached ScreenItem objects are never mutated."""
+    serving time onto copied item dicts so the lru-cached pool is never mutated."""
     result = service.candidates(
         top=top, days=days, min_top=min_top, experiment=experiment,
         view=view, models=models,
     )
-    items = result["items"]
+    # service.candidates() returns items as dicts (ScreenItem.model_dump()).
+    # Copy each dict to attach ai_analysis — never mutate the lru-cached dicts.
+    src_items = result["items"]
     as_of = result.get("as_of_date") or result.get("latest_date") or ""
-    analyses = await fetch_analyses(session, [it.symbol for it in items], as_of)
-    if analyses:
-        result["items"] = [
-            it.model_copy(update={"ai_analysis": analyses.get(it.symbol)}) for it in items
-        ]
+    analyses = await fetch_analyses(session, [it["symbol"] for it in src_items], as_of)
+    new_items = []
+    for it in src_items:
+        a = analyses.get(it["symbol"])
+        new_items.append({**it, "ai_analysis": a.model_dump() if a is not None else None})
+    result["items"] = new_items
     return result

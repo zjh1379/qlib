@@ -20,8 +20,9 @@ def test_candidates_route_attaches_analysis(monkeypatch):
     monkeypatch.setattr(models_router.service, "candidates", lambda **kw: {
         "experiment": "e", "recorder_id": "r", "latest_date": "2026-06-10",
         "window_days": 5, "universe_size": 1, "available_models": [],
+        # service.candidates() returns items as dicts (model_dump), not objects.
         "items": [ScreenItem(rank=1, symbol="SH600519", score_today=1.0,
-                             score_avg=1.0, rank_avg=1.0, days_in_top=1)],
+                             score_avg=1.0, rank_avg=1.0, days_in_top=1).model_dump()],
         "as_of_date": "2026-06-10",
     })
 

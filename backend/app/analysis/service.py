@@ -68,14 +68,15 @@ def _load_picks() -> tuple[str, list[tuple[str, str, dict]]]:
     Runs inside the worker thread (candidates() is sync + qlib-heavy)."""
     from app.models import service as models_service
     result = models_service.candidates()
+    # candidates() returns items as dicts (ScreenItem.model_dump()) — use dict access.
     items = result["items"][: _top_n(Settings())]
     as_of = result.get("as_of_date") or result.get("latest_date") or ""
     picks = [
-        (it.symbol, it.name, {
-            "score_today": it.score_today,
-            "pct_change_5d": it.pct_change_5d,
-            "board": it.board,
-            "is_st": it.is_st,
+        (it["symbol"], it.get("name", ""), {
+            "score_today": it.get("score_today"),
+            "pct_change_5d": it.get("pct_change_5d"),
+            "board": it.get("board"),
+            "is_st": it.get("is_st"),
         })
         for it in items
     ]
