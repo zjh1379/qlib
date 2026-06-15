@@ -33,10 +33,13 @@ class Settings(BaseSettings):
     retrain_python_path: str = "F:/Tools/Anaconda/envs/qlib/python.exe"
 
     # AI analysis layer (解读 + 风险旗标)
-    anthropic_api_key: str = ""           # QLIB_COMPANION_ANTHROPIC_API_KEY (env only, not committed)
-    ai_model: str = "claude-sonnet-4-6"   # spec default (summarize+extract, ~pennies/day); set claude-opus-4-8 for sharper judgment
+    ai_provider: str = "openai"           # openai | deepseek | anthropic
+    openai_api_key: str = ""              # QLIB_COMPANION_OPENAI_API_KEY
+    deepseek_api_key: str = ""            # QLIB_COMPANION_DEEPSEEK_API_KEY
+    anthropic_api_key: str = ""           # QLIB_COMPANION_ANTHROPIC_API_KEY
+    ai_model: str = ""                    # blank = per-provider default (openai=gpt-4o-mini, deepseek=deepseek-chat, anthropic=claude-sonnet-4-6)
     ai_analysis_top_n: int = 10           # analyze the top-N picks per run
-    ai_analysis_enabled: bool = False     # off until a key is set
+    ai_analysis_enabled: bool = False     # off until a provider key is set
 
     @property
     def db_url(self) -> str:

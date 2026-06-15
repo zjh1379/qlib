@@ -3,7 +3,6 @@ Mirrors app/inference/service.py. Single-process backend assumption."""
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import uuid
 from collections import OrderedDict
@@ -12,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.analysis import store
-from app.analysis.llm import analyze_one, make_client
+from app.analysis.llm import analyze_one, make_client, _resolve_key
 from app.analysis.schemas import AnalysisJob, AnalysisStatus, TriggerResponse
 from app.analysis.sources import fetch_news, fetch_notices
 from app.core.config import Settings
@@ -32,13 +31,11 @@ _CONCURRENCY = 4
 
 # --- config resolvers (monkeypatchable in tests) --------------------------
 def _is_enabled(s: Settings) -> bool:
-    return bool(s.ai_analysis_enabled and (s.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")))
+    # Enabled when the toggle is on AND the *active provider's* key is resolvable.
+    return bool(s.ai_analysis_enabled and _resolve_key(s))
 
 def _db_path(s: Settings) -> str:
     return str(Path(s.app_db_path).expanduser().resolve())
-
-def _model(s: Settings) -> str:
-    return s.ai_model
 
 def _top_n(s: Settings) -> int:
     return s.ai_analysis_top_n
@@ -85,21 +82,22 @@ def _load_picks() -> tuple[str, list[tuple[str, str, dict]]]:
     return as_of, picks
 
 
-def _analyze_symbol(symbol: str, name: str, ctx: dict, model: str, as_of: str):
-    """Fetch + LLM for one pick. Returns AiAnalysis or None on hard error (2 attempts)."""
-    client = make_client(Settings().anthropic_api_key)
+def _analyze_symbol(symbol: str, name: str, ctx: dict, as_of: str):
+    """Fetch + LLM for one pick. Returns AiAnalysis or None on hard error (2 attempts).
+    Provider + model come from Settings (openai / deepseek / anthropic)."""
+    kind, client, model = make_client(Settings())
     news = fetch_news(symbol)
     notices = fetch_notices(symbol)
     for attempt in (1, 2):
         try:
-            return analyze_one(client, symbol=symbol, name=name, news=news, notices=notices,
-                               context=ctx, model=model, as_of_date=as_of)
+            return analyze_one(kind, client, model, symbol=symbol, name=name,
+                               news=news, notices=notices, context=ctx, as_of_date=as_of)
         except Exception as exc:
             log.warning("analyze_failed symbol=%s attempt=%d: %s", symbol, attempt, exc)
     return None
 
 
-def _run_picks(job_id: str, db_path: str, model: str) -> int:
+def _run_picks(job_id: str, db_path: str) -> int:
     """Worker body — overridable in tests. Returns count analyzed."""
     as_of, picks = _load_picks()
     if not picks:
@@ -107,7 +105,7 @@ def _run_picks(job_id: str, db_path: str, model: str) -> int:
     rows: list = []
     with ThreadPoolExecutor(max_workers=_CONCURRENCY) as ex:
         fut_to_sym = {
-            ex.submit(_analyze_symbol, sym, name, ctx, model, as_of): sym
+            ex.submit(_analyze_symbol, sym, name, ctx, as_of): sym
             for sym, name, ctx in picks
         }
         for fut, sym in fut_to_sym.items():
@@ -139,17 +137,17 @@ def trigger_analysis(reason: str = "manual_ui") -> TriggerResponse:
         _ACTIVE_JOB_ID = job_id
         _LAST_RUN_AT = now
 
-    db_path, model = _db_path(s), _model(s)
-    threading.Thread(target=_worker, args=(job_id, db_path, model), daemon=True).start()
+    db_path = _db_path(s)
+    threading.Thread(target=_worker, args=(job_id, db_path), daemon=True).start()
     return TriggerResponse(status="started", job_id=job_id)
 
 
-def _worker(job_id: str, db_path: str, model: str) -> None:
+def _worker(job_id: str, db_path: str) -> None:
     global _ACTIVE_JOB_ID, _LAST_SUCCESS_AT, _LAST_ERROR
     analyzed = None
     err = None
     try:
-        analyzed = _run_picks(job_id, db_path, model)
+        analyzed = _run_picks(job_id, db_path)
     except Exception as exc:
         log.exception("analysis_worker_error job_id=%s: %s", job_id, exc)
         err = str(exc)[-2000:]

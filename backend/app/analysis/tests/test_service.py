@@ -14,16 +14,15 @@ def test_trigger_runs_worker_and_persists(monkeypatch, tmp_path):
     db = tmp_path / "app.db"
     monkeypatch.setattr(service, "_is_enabled", lambda s: True)
     monkeypatch.setattr(service, "_db_path", lambda s: str(db))
-    monkeypatch.setattr(service, "_model", lambda s: "claude-opus-4-8")
     monkeypatch.setattr(service, "_top_n", lambda s: 2)
     monkeypatch.setattr(service, "_load_picks", lambda: (
         "2026-06-10",
         [("SH600519", "贵州茅台", {"score_today": 0.9}),
          ("SZ000001", "平安银行", {"score_today": 0.8})],
     ))
-    def fake_one(symbol, name, ctx, model, as_of):
+    def fake_one(symbol, name, ctx, as_of):
         return AiAnalysis(interpretation=f"n-{symbol}", stance="neutral",
-                          model=model, as_of_date=as_of, status="ok")
+                          model="test-model", as_of_date=as_of, status="ok")
     monkeypatch.setattr(service, "_analyze_symbol", fake_one)
     captured = {}
     monkeypatch.setattr(service.store, "upsert_many",

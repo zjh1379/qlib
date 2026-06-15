@@ -14,6 +14,18 @@ SYSTEM = (
     "5. 优先关注公告与实质性事件,弱化纯行情复述类新闻。"
 )
 
+# Appended to the system prompt for OpenAI/DeepSeek JSON mode (they need the
+# exact shape spelled out + the word "JSON" present in the prompt).
+JSON_INSTRUCTION = (
+    "只输出一个 JSON 对象(不要 markdown 代码块、不要多余文字),字段如下:\n"
+    '{"interpretation": "一句话中文解读", '
+    '"risk_flags": [{"type": "立案|退市|商誉|解禁|业绩预警|诉讼|其他", '
+    '"severity": "high|medium|low", "reason": "简述", '
+    '"source": "来源标题", "source_date": "YYYY-MM-DD"}], '
+    '"stance": "favorable|neutral|caution"}\n'
+    "若无实质性利空,risk_flags 返回空数组 []。"
+)
+
 
 def _fmt_pct(v) -> str:
     try:
