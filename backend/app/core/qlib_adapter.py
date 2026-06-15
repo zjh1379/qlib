@@ -255,7 +255,22 @@ def get_instruments_for_market(market: str) -> list[str]:
 
 
 def get_calendar_info() -> tuple[date, int]:
-    """Return (last_trading_day, total_calendar_size) for the configured market."""
+    """Return (last_trading_day, total_calendar_size) for the configured market.
+
+    Reads calendars/day.txt directly so the value is ALWAYS fresh after a data
+    refresh. qlib's D.calendar() caches the calendar in memory at init, so a
+    long-running backend would otherwise keep reporting the pre-refresh date
+    (e.g. show 2026-06-02 even after the bins were updated to 2026-06-15) until
+    it restarts. Falls back to qlib's calendar if the file can't be read.
+    """
+    day_file = Settings().qlib_data_dir / "calendars" / "day.txt"
+    try:
+        lines = [ln.strip() for ln in day_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if lines:
+            return date.fromisoformat(lines[-1][:10]), len(lines)
+    except Exception:
+        pass
+    # Fallback: qlib's (possibly cached) in-memory calendar.
     init_qlib_once()
     cal = D.calendar(freq="day")
     if not len(cal):
