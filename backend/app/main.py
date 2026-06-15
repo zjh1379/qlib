@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
         repo_root=repo_root,
     )
 
-    manager = SchedulerManager(retrain_job)
+    manager = SchedulerManager(retrain_job, logs_dir=repo_root / "logs")
     set_manager(manager)
     from app.core import db as _db
     if _db._session_maker is None:

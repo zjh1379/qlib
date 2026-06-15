@@ -53,17 +53,20 @@ class AlreadyRunning(Exception):
     pass
 
 
-JobCallable = Callable[[], Awaitable[None]]
+JobCallable = Callable[[str, Path], Awaitable[None]]
 
 
 def make_subprocess_retrain_job(python_path: str, repo_root: Path) -> JobCallable:
     """Return an async job that spawns `python -m production.rolling_train run-once`
-    as a child process. Required because rolling_train blocks for 1.5-4 hours of
-    CPU/GPU work; running it inside the FastAPI event loop would freeze HTTP.
+    as a child process and writes its stdout to a per-job log file. Required
+    because rolling_train blocks for many minutes of CPU/GPU work; running it
+    inside the FastAPI event loop would freeze HTTP. The log file is tailed by
+    the training layer for structured PROGRESS lines.
     """
 
-    async def _job() -> None:
-        _log.info("retrain_subprocess_starting", python=python_path, cwd=str(repo_root))
+    async def _job(job_id: str, log_path: Path) -> None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        _log.info("retrain_subprocess_starting", job_id=job_id, python=python_path, cwd=str(repo_root))
         proc = await asyncio.create_subprocess_exec(
             python_path,
             "-m",
@@ -73,18 +76,20 @@ def make_subprocess_retrain_job(python_path: str, repo_root: Path) -> JobCallabl
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        # Drain stdout so the buffer doesn't block the child
         if proc.stdout is None:
-            _log.error("retrain_subprocess_no_stdout")
+            _log.error("retrain_subprocess_no_stdout", job_id=job_id)
             await proc.wait()
-            return
-        async for line in proc.stdout:
-            _log.info("retrain_subprocess_stdout", line=line.decode(errors="replace").rstrip())
+            raise RuntimeError("retrain subprocess produced no stdout pipe")
+        with log_path.open("wb") as fh:
+            async for line in proc.stdout:
+                fh.write(line)
+                fh.flush()
+                _log.info("retrain_subprocess_stdout", line=line.decode(errors="replace").rstrip())
         rc = await proc.wait()
         if rc != 0:
-            _log.error("retrain_subprocess_failed", returncode=rc)
-        else:
-            _log.info("retrain_subprocess_ok")
+            _log.error("retrain_subprocess_failed", job_id=job_id, returncode=rc)
+            raise RuntimeError(f"rolling_train exited {rc}")
+        _log.info("retrain_subprocess_ok", job_id=job_id)
 
     return _job
 
@@ -98,12 +103,15 @@ class SchedulerManager:
 
     JOB_ID = "retrain_weekly"
 
-    def __init__(self, job_fn: JobCallable):
+    def __init__(self, job_fn: JobCallable, logs_dir: Path | None = None):
         self._scheduler = AsyncIOScheduler()
         self._raw_job_fn = job_fn
         self._running_lock = asyncio.Lock()
         # Lock binding to the event loop happens at first `await`. Construct this
         # inside the FastAPI lifespan to ensure the right loop is used.
+        # Per-job subprocess stdout is written under logs_dir so the training
+        # layer can tail structured PROGRESS lines. Defaults to <repo>/logs.
+        self._logs_dir = logs_dir or (Path(__file__).resolve().parent.parent.parent.parent / "logs")
         self._started = False
         # Tracks manual run_now invocations that have been queued via add_job
         # but whose _gated_job_fn body has not yet started. Prevents a TOCTOU
@@ -119,6 +127,9 @@ class SchedulerManager:
         self._MAX_JOBS = 50
         self._jobs: "_OD[str, dict]" = _OD()
         self._active_job_id: str | None = None
+
+    def _log_path_for(self, job_id: str) -> Path:
+        return self._logs_dir / f"api_retrain_{job_id}.log"
 
     def _remember_job(self, job_id: str, entry: dict) -> None:
         self._jobs[job_id] = entry
@@ -245,6 +256,7 @@ class SchedulerManager:
                 "finished_at": None,
                 "queued_at": datetime.now(tz=_CST).isoformat(),
                 "error": None,
+                "log_path": str(self._log_path_for(job_id)),
             })
             self._active_job_id = job_id
             job = self._scheduler.add_job(
@@ -287,6 +299,7 @@ class SchedulerManager:
                 "finished_at": None,
                 "queued_at": datetime.now(tz=_CST).isoformat(),
                 "error": None,
+                "log_path": str(self._log_path_for(_tracked_job_id)),
             })
             self._active_job_id = _tracked_job_id
 
@@ -303,7 +316,7 @@ class SchedulerManager:
                     entry["status"] = "running"
                     entry["started_at"] = datetime.now(tz=_CST).isoformat()
                 try:
-                    await self._raw_job_fn()
+                    await self._raw_job_fn(_tracked_job_id, self._log_path_for(_tracked_job_id))
                     if entry is not None:
                         entry["status"] = "done"
                 except Exception as exc:
