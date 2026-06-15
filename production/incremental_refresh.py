@@ -34,6 +34,14 @@ for _v in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY'
 
 import pandas as pd
 import baostock as bs
+import socket as _socket
+
+# baostock has NO client-side timeout — a stalled response (flaky session /
+# half-open TCP) would block a fetch FOREVER and wedge the whole refresh
+# mid-loop (root-caused 2026-06-15: refresh stuck at N/842). Bound every
+# baostock socket op so a stall raises a catchable error instead of hanging.
+_BAOSTOCK_TIMEOUT_S = int(os.environ.get("BAOSTOCK_TIMEOUT_S", "20"))
+_socket.setdefaulttimeout(_BAOSTOCK_TIMEOUT_S)
 
 
 # Hot ETFs (baostock codes). Verify each one fetches successfully; log warnings + skip failures.
@@ -153,6 +161,35 @@ def read_csv_last_date(csv_path: Path) -> date | None:
         return None
 
 
+def _progress_file(csv_dir: Path, cycle: str) -> Path:
+    return csv_dir / f".refresh_progress_{cycle}.txt"
+
+
+def _read_done_set(csv_dir: Path, cycle: str) -> set[str]:
+    """baostock codes already processed this cycle. Lets a re-run skip them with
+    NO baostock call (resumable). Also prunes checkpoint files from earlier days."""
+    try:
+        keep = f".refresh_progress_{cycle}.txt"
+        for p in csv_dir.glob(".refresh_progress_*.txt"):
+            if p.name != keep:
+                p.unlink()
+    except Exception:
+        pass
+    f = _progress_file(csv_dir, cycle)
+    if not f.is_file():
+        return set()
+    return {ln.strip() for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip()}
+
+
+def _mark_done(csv_dir: Path, cycle: str, bs_code: str) -> None:
+    """Append a code to this cycle's checkpoint (best-effort)."""
+    try:
+        with _progress_file(csv_dir, cycle).open("a", encoding="utf-8") as fh:
+            fh.write(bs_code + "\n")
+    except Exception:
+        pass
+
+
 def fetch_one(bs_code: str, start: str, end: str) -> pd.DataFrame:
     rs = bs.query_history_k_data_plus(
         bs_code,
@@ -175,6 +212,26 @@ def fetch_one(bs_code: str, start: str, end: str) -> pd.DataFrame:
     df = df.dropna(subset=["open", "close"])
     df["change"] = df["pctChg"] / 100.0
     return df.drop(columns=["pctChg"])
+
+
+def fetch_with_recovery(bs_code: str, start: str, end: str) -> pd.DataFrame:
+    """fetch_one + one retry after a fresh re-login.
+
+    The socket timeout turns a baostock stall into a raised error; this catches
+    it, resets the (possibly poisoned/expired) baostock session, and retries
+    once so a single stalled instrument neither hangs the run nor cascades into
+    failing every subsequent instrument. A 2nd failure propagates to the caller,
+    which logs + skips that one instrument.
+    """
+    try:
+        return fetch_one(bs_code, start, end)
+    except Exception:
+        try:
+            bs.logout()
+        except Exception:
+            pass
+        bs.login()  # bounded by the socket timeout too
+        return fetch_one(bs_code, start, end)
 
 
 def append_to_csv(csv_path: Path, sym: str, df: pd.DataFrame) -> int:
@@ -401,27 +458,35 @@ def main():
                     all_codes.append(c)
 
         today_str = date.today().isoformat()
-        progress("fetch", 0, len(all_codes), f"start incremental fetch to {today_str}")
+        cycle = today_str  # one refresh "cycle" per calendar day
+        done_set = _read_done_set(csv_dir, cycle)
+        progress("fetch", 0, len(all_codes),
+                 f"start incremental fetch to {today_str} (resuming: {len(done_set)} already done)")
 
         total_appended = 0
         for i, bs_code in enumerate(all_codes, 1):
+            # Resumable: anything already processed this cycle is skipped with NO
+            # baostock call, so a re-run after an interruption continues from the break.
+            if bs_code in done_set:
+                progress("fetch", i, len(all_codes), f"{bs_code}: skipped (already done)")
+                continue
             sym = to_qlib_symbol(bs_code)
             target = csv_dir / f"{sym}.csv"
-            start = args.start
-            if not args.full:
-                last = read_csv_last_date(target)
-                if last is not None:
-                    start = (last + timedelta(days=1)).isoformat()
+            last = None if args.full else read_csv_last_date(target)
+            start = (last + timedelta(days=1)).isoformat() if last is not None else args.start
             if date.fromisoformat(start) > date.fromisoformat(today_str):
+                _mark_done(csv_dir, cycle, bs_code)
                 progress("fetch", i, len(all_codes), f"{bs_code}: already up to date")
                 continue
             try:
-                df = fetch_one(bs_code, start, today_str)
+                df = fetch_with_recovery(bs_code, start, today_str)
             except Exception as e:
-                progress("fetch", i, len(all_codes), f"{bs_code}: ERROR {e}")
+                # NOT marked done -> automatically retried on the next run.
+                progress("fetch", i, len(all_codes), f"{bs_code}: ERROR {e} (will retry)")
                 continue
             n = append_to_csv(target, sym, df) if not df.empty else 0
             total_appended += n
+            _mark_done(csv_dir, cycle, bs_code)
             progress("fetch", i, len(all_codes), f"{bs_code}: +{n} rows")
 
         # 3. dump_bin update
