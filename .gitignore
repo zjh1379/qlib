@@ -81,3 +81,13 @@ frontend/tsconfig.tsbuildinfo
 
 # intraday P1 5min cache (large, regenerable from baostock)
 production/intraday/cache/
+
+# local run logs / scratch
+logs/
+*.log
+*.out
+*.err
+
+# research outputs (regenerable; keep the dir via .gitkeep, ignore contents)
+production/reports/
+!production/reports/.gitkeep
