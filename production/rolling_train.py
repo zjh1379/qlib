@@ -54,6 +54,7 @@ import yaml
 from production.consensus import consensus_per_row, write_pred_pkl
 from production.pit_constituents import load_or_refresh, members_on
 from production.post_process import ewma_smooth
+from production.progress import emit_progress
 from production.walk_forward import HorizonConfig, split
 
 _log = logging.getLogger("rolling_train")
@@ -62,6 +63,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_MODELS = ("lgbm", "alstm", "tra")
+
+
+def progress_total(cfg: "RollingConfig") -> int:
+    """Total progress units for one run_once: one per enabled base model, plus
+    three fixed stages (universe build, ensemble, done). Must stay in sync with
+    the emit_progress calls in run_once."""
+    enabled = [s for s in cfg.model_specs if s.get("enabled")]
+    return len(enabled) + 3
 
 
 def resolve_feature_handler(features: str) -> tuple[str, str]:
@@ -409,11 +418,17 @@ def run_once(
         len(members), str(end_date), universe_name,
     )
 
+    total = progress_total(cfg)
+    step = 1
+    emit_progress("universe", step, total, f"universe {len(members)} stocks")
+
     # Train all enabled base models for all horizons
     series_list: list[pd.Series] = []
     for spec in cfg.model_specs:
         if not spec["enabled"]:
             continue
+        step += 1
+        emit_progress("train", step, total, f"training {spec['id']}")
         if spec["id"] == "lgbm":
             for h in cfg.horizons:
                 s = train_lgbm_horizon(cfg, h, universe_name, end_date, features=features, objective=objective)
@@ -434,6 +449,9 @@ def run_once(
         return None
 
     base_preds = pd.concat(series_list, axis=1).dropna(how="all")
+
+    step += 1
+    emit_progress("ensemble", step, total, "stacking ensemble")
 
     # Ensemble step — Phase E: Ridge stacking with OOF training, plus a
     # 3-level fallback chain: Ridge -> rank_average -> roll back to last week.
@@ -562,6 +580,7 @@ def run_once(
     except Exception as exc:
         _log.warning("rollback_check_failed error=%s", str(exc))
 
+    emit_progress("done", total, total, "done")
     return pred_path
 
 
