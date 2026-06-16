@@ -40,19 +40,20 @@ export function usePredictionHistory(symbol: string, days = 60) {
 
 export function useCandidates(
   params: {
-    top?: number;
-    days?: number;
-    min_top?: number;
+    top?: number; days?: number; min_top?: number;
     view?: 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
     models?: string[];
+    enabled?: boolean;
   } = {},
 ) {
+  const { enabled = true, ...q } = params;
   return useQuery({
-    queryKey: ['models', 'candidates', params],
-    queryFn: () => api.models.candidates(params),
-    staleTime: Infinity,         // Candidates rarely change within a session.
-    gcTime: 30 * 60_000,         // Keep in memory for 30 min after last use.
-    refetchOnWindowFocus: false, // Don't refetch when window regains focus.
+    queryKey: ['models', 'candidates', q],
+    queryFn: () => api.models.candidates(q),
+    enabled,
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
   });
 }

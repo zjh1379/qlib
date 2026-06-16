@@ -8,7 +8,7 @@ import { api } from '@/api/client';
 
 import RecentlyViewed from './picks/RecentlyViewed';
 import { FilterBar } from './picks/FilterBar';
-import { applyFilters } from './picks/filter';
+import { selectCandidates } from './picks/filter';
 import { applySort, DEFAULT_SORT, nextSort, SortKey, SortState } from './picks/sort';
 import HorizonMiniBar from './picks/HorizonMiniBar';
 import StalenessBanner from './picks/StalenessBanner';
@@ -17,6 +17,10 @@ import RiskFlagBadge from './picks/RiskFlagBadge';
 import AiNotePanel from './picks/AiNotePanel';
 import type { FilterParams } from './picks/types';
 import { useFilterParams } from './picks/useFilterParams';
+import RecomputeProgress from './picks/RecomputeProgress';
+import { useRecompute } from './picks/useRecompute';
+import { comboKey } from './picks/persistence';
+import { WINDOW_K } from './picks/types';
 
 import type { components } from '@/api/types.gen';
 import type { AiAnalysis } from '@/analysis/types';
@@ -27,13 +31,53 @@ type HorizonId = '1d' | '5d' | '20d';
 
 // Fixed base params — the candidate pool is computed once per (recorder, view).
 // Filter & sort happen client-side, so we always fetch a generous pool.
-const POOL_SIZE = 300;
-const WINDOW_DAYS = 5;
+const POOL_SIZE = 300;        // must equal backend CANDIDATES_POOL_CAP
+const WINDOW_DAYS = WINDOW_K; // 20; must equal backend CANDIDATES_WINDOW_K
 const MIN_TOP = 0;
 
 export default function Picks() {
   const [params, update, reset] = useFilterParams();
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
+
+  // Draft tier: view+models edited freely; applied (= params.view/models)
+  // only changes after a successful recompute.
+  const [draftView, setDraftView] = useState(params.view);
+  const [draftModels, setDraftModels] = useState(params.models);
+  useEffect(() => { setDraftView(params.view); }, [params.view]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setDraftModels(params.models); }, [params.models.join(',')]);
+
+  const recompute = useRecompute();
+  const appliedWarmed = recompute.isWarmed(params.view, params.models);
+
+  // Warm the applied combo via the progress job before the heavy GET runs
+  // (GET is gated by `enabled` below). Runs on mount + when applied combo changes.
+  useEffect(() => {
+    if (!appliedWarmed && (!recompute.job || recompute.job.status !== 'running')) {
+      recompute.start(params.view, params.models);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.view, params.models.join(','), appliedWarmed]);
+
+  const recomputeDirty =
+    comboKey(draftView, draftModels) !== comboKey(params.view, params.models);
+
+  const onRecompute = async () => {
+    if (recompute.isWarmed(draftView, draftModels)) {
+      update({ view: draftView, models: draftModels });
+      return;
+    }
+    await recompute.start(draftView, draftModels);
+  };
+
+  // When a recompute for the DRAFT finishes, commit draft -> applied.
+  useEffect(() => {
+    if (recompute.job?.status === 'done' && recomputeDirty
+        && recompute.isWarmed(draftView, draftModels)) {
+      update({ view: draftView, models: draftModels });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recompute.job?.status]);
 
   const qc = useQueryClient();
   const { data: aiJob } = useQuery({
@@ -49,23 +93,24 @@ export default function Picks() {
     prevAiStatus.current = aiJob?.status ?? null;
   }, [aiJob?.status, qc]);
 
-  // Single backend call per session (per view). Filter changes do NOT re-fetch.
   const { data, isPending, isFetching, error } = useCandidates({
     top: POOL_SIZE,
     days: WINDOW_DAYS,
     min_top: MIN_TOP,
     view: params.view,
     models: params.models,
+    enabled: appliedWarmed,
   });
 
-  // Client-side filter (cheap; runs on every render).
-  const filtered = useMemo(() => {
+  // Client-side selection pipeline (filter -> persistence -> window score -> cap),
+  // then display sort over the selected rows.
+  const sorted = useMemo(() => {
     if (!data?.items) return [];
-    return applyFilters(data.items as Candidate[], params);
-  }, [data?.items, params]);
-
-  // Client-side sort.
-  const sorted = useMemo(() => applySort(filtered, sort), [filtered, sort]);
+    const selected = selectCandidates(
+      data.items as Candidate[], params, data.window_dates?.length ?? 0,
+    );
+    return applySort(selected, sort);
+  }, [data?.items, data?.window_dates, params, sort]);
 
   // Extract target dates from the first item that has horizons populated
   const targetDates = useMemo(() => {
@@ -128,17 +173,23 @@ export default function Picks() {
 
       <RecentlyViewed />
 
+      <RecomputeProgress job={recompute.job} elapsedSec={recompute.elapsedSec} />
+
       <FilterBar
         params={params}
         resultCount={data ? sorted.length : null}
         candidateCount={data ? data.items.length : null}
         onChange={update}
-        onReset={() => {
-          reset();
-          setSort(DEFAULT_SORT);
-        }}
+        onReset={() => { reset(); setSort(DEFAULT_SORT); setDraftView('ensemble'); setDraftModels([]); }}
         availableModels={data?.available_models ?? []}
         activeModels={data?.active_models ?? null}
+        draftView={draftView}
+        draftModels={draftModels}
+        onDraftView={setDraftView}
+        onDraftModels={setDraftModels}
+        recomputeDirty={recomputeDirty}
+        onRecompute={onRecompute}
+        recomputeBusy={recompute.job?.status === 'running'}
       />
 
       <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-5">
@@ -147,8 +198,8 @@ export default function Picks() {
         </h2>
         {error ? (
           <div className="text-red-400 text-sm">加载失败: {(error as Error).message}</div>
-        ) : isPending ? (
-          <div className="text-[#8b949e] text-sm">首次加载候选池中… (后端计算 ~30-60s, 之后所有筛选瞬时)</div>
+        ) : (isPending || !appliedWarmed) ? (
+          <div className="text-[#8b949e] text-sm">候选池计算中…（见上方进度条）</div>
         ) : data && sorted.length === 0 ? (
           <EmptyState params={params} totalCandidates={data.items.length} />
         ) : data ? (
