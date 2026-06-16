@@ -11,7 +11,7 @@ async def test_run_now_sets_log_path_and_invokes_job_with_it(tmp_path, monkeypat
     monkeypatch.setattr(_db, "_session_maker", None)
     captured = {}
 
-    async def fake_job(job_id: str, log_path: Path) -> None:
+    async def fake_job(job_id: str, log_path: Path, run_spec=None) -> None:
         captured["job_id"] = job_id
         captured["log_path"] = log_path
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -40,7 +40,7 @@ async def test_job_raising_marks_failed(tmp_path, monkeypatch):
     import app.core.db as _db
     monkeypatch.setattr(_db, "_session_maker", None)
 
-    async def boom(job_id: str, log_path: Path) -> None:
+    async def boom(job_id: str, log_path: Path, run_spec=None) -> None:
         raise RuntimeError("rolling_train exited 1")
 
     mgr = SchedulerManager(boom, logs_dir=tmp_path)

@@ -24,7 +24,7 @@ async def wired_db(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_job_lifecycle_writes_training_run(tmp_path, wired_db):
-    async def fake_job(job_id: str, log_path: Path) -> None:
+    async def fake_job(job_id: str, log_path: Path, run_spec=None) -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("PROGRESS {\"phase\":\"done\",\"current\":1,\"total\":1,\"message\":\"\"}\nRECORDER rec_ok\n", encoding="utf-8")
 

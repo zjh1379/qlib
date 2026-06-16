@@ -53,7 +53,7 @@ class AlreadyRunning(Exception):
     pass
 
 
-JobCallable = Callable[[str, Path], Awaitable[None]]
+JobCallable = Callable[[str, Path, "list[str] | None"], Awaitable[None]]
 
 
 def make_subprocess_retrain_job(python_path: str, repo_root: Path) -> JobCallable:
@@ -64,14 +64,15 @@ def make_subprocess_retrain_job(python_path: str, repo_root: Path) -> JobCallabl
     the training layer for structured PROGRESS lines.
     """
 
-    async def _job(job_id: str, log_path: Path) -> None:
+    async def _job(job_id: str, log_path: Path, run_spec: list[str] | None = None) -> None:
+        argv = run_spec if run_spec else ["run-once"]
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        _log.info("retrain_subprocess_starting", job_id=job_id, python=python_path, cwd=str(repo_root))
+        _log.info("retrain_subprocess_starting", job_id=job_id, argv=argv, python=python_path, cwd=str(repo_root))
         proc = await asyncio.create_subprocess_exec(
             python_path,
             "-m",
             "production.rolling_train",
-            "run-once",
+            *argv,
             cwd=str(repo_root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -232,7 +233,9 @@ class SchedulerManager:
         _log.info("schedule_updated", schedule=schedule.model_dump())
         return schedule
 
-    async def run_now(self, session: AsyncSession, force: bool = False) -> str:
+    async def run_now(
+        self, session: AsyncSession, force: bool = False, run_spec: list[str] | None = None
+    ) -> str:
         now = datetime.now(tz=_CST)
         if not force and is_trading_hours_cst(now):
             raise TradingHoursViolation(
@@ -257,6 +260,7 @@ class SchedulerManager:
                 "queued_at": datetime.now(tz=_CST).isoformat(),
                 "error": None,
                 "log_path": str(self._log_path_for(job_id)),
+                "run_spec": run_spec,
             })
             self._active_job_id = job_id
             job = self._scheduler.add_job(
@@ -317,7 +321,11 @@ class SchedulerManager:
                     entry["started_at"] = datetime.now(tz=_CST).isoformat()
                 await self._persist_run(job_id=_tracked_job_id, phase="start", entry=entry)
                 try:
-                    await self._raw_job_fn(_tracked_job_id, self._log_path_for(_tracked_job_id))
+                    await self._raw_job_fn(
+                        _tracked_job_id,
+                        self._log_path_for(_tracked_job_id),
+                        (entry or {}).get("run_spec"),
+                    )
                     if entry is not None:
                         entry["status"] = "done"
                     await self._persist_run(job_id=_tracked_job_id, phase="done", entry=entry)
