@@ -41,6 +41,8 @@ export interface TrainingRunRow {
   ic_mean: number | null;
   ir: number | null;
   acceptance_passed: boolean | null;
+  experiment: string | null;
+  is_candidate: boolean;
 }
 
 export class ApiError extends Error {
@@ -385,11 +387,16 @@ export const api = {
     },
   },
   training: {
-    run: (force = false) =>
+    run: (body: { scope: 'full' | 'single'; models?: string[]; force?: boolean }) =>
       request<StartTrainingResponse>('/api/training/run', {
         method: 'POST',
-        body: JSON.stringify({ scope: 'full', force }),
+        body: JSON.stringify({ scope: body.scope, models: body.models ?? [], force: body.force ?? false }),
       }),
+    promote: (recorder_id: string, candidate_experiment: string) =>
+      request<{ status: string; new_recorder_name?: string; production_experiment?: string; from_recorder_id?: string }>(
+        '/api/training/promote',
+        { method: 'POST', body: JSON.stringify({ recorder_id, candidate_experiment }) },
+      ),
     active: () => request<TrainingJobStatus | null>('/api/training/jobs/active'),
     status: (jobId: string) =>
       request<TrainingJobStatus | null>(`/api/training/jobs/${encodeURIComponent(jobId)}`),

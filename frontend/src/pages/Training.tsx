@@ -46,7 +46,7 @@ export default function Training() {
         <button
           className="px-3 py-1.5 rounded bg-[#1f6feb] text-white text-sm disabled:opacity-50"
           disabled={running || start.isPending}
-          onClick={() => start.mutate(false)}
+          onClick={() => start.mutate({ scope: 'full', force: false })}
         >
           {running ? '训练进行中…' : '立即训练(全量)'}
         </button>
