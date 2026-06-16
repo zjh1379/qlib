@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useActiveTrainingJob, useStartTraining, useTrainingRuns, useRollback } from '@/training/hooks';
 import { toast } from '@/jobs/toast';
+import { useCompare } from '@/pages/evaluation/hooks';
+import { CompareCard } from '@/pages/evaluation/CompareCard';
 
 const PHASE_LABEL: Record<string, string> = {
   universe: '构建股票池',
@@ -169,6 +171,21 @@ export default function Training() {
           </div>
         )}
       </section>
+
+      {/* ④ 对比 */}
+      {selected.length === 2 && <CompareSection a={selected[0]} b={selected[1]} />}
     </div>
+  );
+}
+
+function CompareSection({ a, b }: { a: string; b: string }) {
+  const cmp = useCompare(a, b);
+  return (
+    <section className="rounded-lg border border-[#30363d] p-4 space-y-3">
+      <h2 className="text-sm font-medium text-[#8b949e]">对比(已选 2 个)</h2>
+      {cmp.isPending && <p className="text-xs text-[#8b949e]">评估/对比计算中…(首次较慢)</p>}
+      {cmp.isError && <p className="text-xs text-red-400">对比失败:{String((cmp.error as Error)?.message ?? cmp.error)}</p>}
+      {cmp.data && <CompareCard data={cmp.data} />}
+    </section>
   );
 }
