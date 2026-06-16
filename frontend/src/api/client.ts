@@ -27,6 +27,22 @@ export interface StartTrainingResponse {
   reason?: string;
 }
 
+export interface TrainingRunRow {
+  job_id: string | null;
+  kind: string | null;
+  scope: string | null;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'historical';
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+  recorder_id: string | null;
+  run_name: string | null;
+  error: string | null;
+  ic_mean: number | null;
+  ir: number | null;
+  acceptance_passed: boolean | null;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -377,5 +393,6 @@ export const api = {
     active: () => request<TrainingJobStatus | null>('/api/training/jobs/active'),
     status: (jobId: string) =>
       request<TrainingJobStatus | null>(`/api/training/jobs/${encodeURIComponent(jobId)}`),
+    runs: () => request<TrainingRunRow[]>('/api/training/runs'),
   },
 };

@@ -31,3 +31,22 @@ export function useTrainingJobDetail(jobId: string | null) {
     refetchIntervalInBackground: true,
   });
 }
+
+export function useTrainingRuns() {
+  return useQuery({
+    queryKey: ['training', 'runs'],
+    queryFn: () => api.training.runs(),
+    staleTime: 10_000,
+  });
+}
+
+export function useRollback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (target: 'previous_1' | 'previous_2') => api.models.rollback(target),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['training', 'runs'] });
+      qc.invalidateQueries({ queryKey: ['evaluation', 'recorders'] });
+    },
+  });
+}
