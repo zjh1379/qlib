@@ -814,6 +814,11 @@ def main() -> None:
         help="LGBM objective: 'mse' (default) or 'lambdarank' (learning-to-rank).",
     )
 
+    p_reblend = sub.add_parser("reblend", help="Retrain ONE model on the latest fold + re-blend into a candidate.")
+    p_reblend.add_argument("--only", required=True, help="model id: lgbm | alstm | tra")
+    p_reblend.add_argument("--end-date", default=None, help="fold end date; default = latest ensemble recorder's date")
+    p_reblend.add_argument("--config", default="production/configs/rolling_ensemble.yaml")
+
     args = parser.parse_args()
 
     if args.cmd == "run-once":
@@ -853,6 +858,12 @@ def main() -> None:
         print(f"OK: backfilled {len(paths)} folds")
         for p in paths:
             print(f"  {p}")
+    elif args.cmd == "reblend":
+        cfg = load_config(REPO_ROOT / args.config)
+        from production.reblend import reblend_single, latest_full_fold_end_date
+        end = date.fromisoformat(args.end_date) if args.end_date else latest_full_fold_end_date(cfg)
+        name = reblend_single(cfg, args.only, end)
+        print(f"OK: wrote candidate {name}")
     else:
         raise NotImplementedError(args.cmd)
 
