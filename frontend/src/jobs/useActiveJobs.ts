@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/api/client';
 import { useJobPolling } from './useJobPolling';
 
-export type ActiveJobKind = 'refresh' | 'retrain' | 'evaluation' | 'inference' | 'analysis';
+export type ActiveJobKind = 'refresh' | 'retrain' | 'evaluation' | 'inference' | 'analysis' | 'recompute';
 
 export interface ActiveJob {
   kind: ActiveJobKind;
@@ -36,6 +36,7 @@ export function useActiveJobs(): ActiveJob[] {
   const evals = useJobPolling('evaluation', () => api.data.evalActive(), interval);
   const inference = useJobPolling('inference', () => api.inference.active(), interval);
   const analysis = useJobPolling('analysis', () => api.analysis.active(), interval);
+  const recompute = useJobPolling('recompute', () => api.models.recomputeActive(), interval);
 
   // Watch for any running job and bump polling to fast.
   useEffect(() => {
@@ -44,10 +45,11 @@ export function useActiveJobs(): ActiveJob[] {
       (retrain?.status === 'pending' || retrain?.status === 'running') ||
       (Array.isArray(evals) && evals.length > 0) ||
       (inference?.status === 'running') ||
-      (analysis?.status === 'running')
+      (analysis?.status === 'running') ||
+      (recompute?.status === 'running')
     );
     if (running !== hasActive) setHasActive(!!running);
-  }, [refresh, retrain, evals, inference, analysis, hasActive]);
+  }, [refresh, retrain, evals, inference, analysis, recompute, hasActive]);
 
   const out: ActiveJob[] = [];
 
@@ -146,6 +148,22 @@ export function useActiveJobs(): ActiveJob[] {
         detail: analysis.analyzed != null ? `${analysis.analyzed} 只` : undefined,
         status,
         started_at: analysis.started_at,
+        href: '/picks',
+      });
+    }
+  }
+
+  if (recompute) {
+    const status = recompute.status as ActiveJob['status'];
+    const recent =
+      recompute.started_at && Date.now() - new Date(recompute.started_at).getTime() < 60_000;
+    if (status === 'running' || (recent && (status === 'done' || status === 'failed'))) {
+      out.push({
+        kind: 'recompute',
+        label: status === 'running' ? '重算中' : status === 'done' ? '✓ 重算完成' : '✗ 重算失败',
+        detail: recompute.progress ? `${recompute.progress.percent}%` : undefined,
+        status,
+        started_at: recompute.started_at,
         href: '/picks',
       });
     }
