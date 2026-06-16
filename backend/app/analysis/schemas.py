@@ -11,6 +11,7 @@ class RiskFlag(BaseModel):
     reason: str               # short, grounded in the cited source
     source: str               # the news/announcement title it came from
     source_date: str          # ISO date of the source
+    verified: bool = True      # set by guardrails: source matched a provided item
 
 
 class AnalysisResult(BaseModel):
@@ -28,6 +29,9 @@ class AiAnalysis(BaseModel):
     model: str = ""
     as_of_date: str = ""
     status: str = "ok"        # ok | partial | failed
+    adjustments: list[str] = Field(default_factory=list)  # guardrail interventions (audit)
+    news_count: int = 0       # provenance: how many news items fed the model
+    notice_count: int = 0     # provenance: how many announcements fed the model
 
 
 class AnalysisJob(BaseModel):

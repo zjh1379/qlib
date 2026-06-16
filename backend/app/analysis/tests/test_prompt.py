@@ -23,3 +23,18 @@ def test_user_message_includes_titles_and_context():
 def test_user_message_handles_empty_sources():
     msg = build_user_message("SH600519", "贵州茅台", [], [], {"score_today": 0.5})
     assert "无" in msg or "暂无" in msg               # graceful empty-state
+
+
+def test_user_message_fences_untrusted_sources():
+    msg = build_user_message(
+        symbol="SH600519", name="贵州茅台",
+        news=[NewsItem(title="某条新闻", date="2026-06-10", source="东财")],
+        notices=[NoticeItem(title="某条公告", date="2026-06-09")],
+        context={"score_today": 0.9},
+    )
+    assert "BEGIN_UNTRUSTED_SOURCES" in msg and "END_UNTRUSTED_SOURCES" in msg
+    assert "忽略" in msg and "指令" in msg            # ignore embedded instructions
+    # the scraped titles live inside the fence; quant context stays outside it
+    head, _, rest = msg.partition("BEGIN_UNTRUSTED_SOURCES")
+    fenced, _, _ = rest.partition("END_UNTRUSTED_SOURCES")
+    assert "量化分数" in head and "某条公告" in fenced and "某条新闻" in fenced

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from app.analysis.llm import analyze_one, make_client
 from app.analysis.schemas import AnalysisResult, RiskFlag
-from app.analysis.sources import NewsItem
+from app.analysis.sources import NewsItem, NoticeItem
 
 _RESULT = AnalysisResult(
     interpretation="超跌+业绩预喜", stance="favorable",
@@ -62,6 +62,29 @@ def test_analyze_one_openai_path_parses_json():
     assert out.status == "ok"
     assert client.chat.completions.calls[0]["response_format"] == {"type": "json_object"}
     assert client.chat.completions.calls[0]["model"] == "gpt-4o-mini"
+
+
+def test_analyze_one_runs_guardrails_on_hallucinated_flag():
+    bad = AnalysisResult(
+        interpretation="x", stance="caution",
+        risk_flags=[RiskFlag(type="立案", severity="high", reason="被立案",
+                             source="查无此公告", source_date="2026-06-09")])
+    client = _FakeOpenAI(bad.model_dump_json())
+    out = analyze_one("openai", client, "gpt-4o-mini", symbol="SH600519", name="x",
+                      news=[NewsItem(title="业绩预喜")], notices=[],
+                      context={"score_today": 0.5}, as_of_date="2026-06-10")
+    assert out.risk_flags[0].verified is False   # source not among provided items
+    assert out.adjustments                       # intervention recorded for audit
+
+
+def test_analyze_one_reports_source_counts():
+    client = _FakeOpenAI(_RESULT.model_dump_json())
+    out = analyze_one("openai", client, "gpt-4o-mini", symbol="SH600519", name="x",
+                      news=[NewsItem(title="a"), NewsItem(title="b")],
+                      notices=[NoticeItem(title="c")],
+                      context={"score_today": 0.5}, as_of_date="2026-06-10")
+    assert out.news_count == 2
+    assert out.notice_count == 1
 
 
 def test_analyze_one_status_partial_when_no_sources():

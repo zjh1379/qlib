@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 
+from app.analysis.guardrails import apply_guardrails
 from app.analysis.prompt import JSON_INSTRUCTION, SYSTEM, build_user_message
 from app.analysis.schemas import AiAnalysis, AnalysisResult
 from app.analysis.sources import NewsItem, NoticeItem
@@ -84,8 +85,12 @@ def analyze_one(
             ],
         )
         r = AnalysisResult.model_validate_json(resp.choices[0].message.content)
+    # Deterministic guardrails: ground risk flags in the sources we fed in,
+    # validate dates, keep stance internally consistent (LLM proposes, rules verify).
+    r, adjustments = apply_guardrails(r, news=news, notices=notices, as_of_date=as_of_date)
     status = "ok" if (news or notices) else "partial"  # context-only = partial
     return AiAnalysis(
         interpretation=r.interpretation, risk_flags=r.risk_flags, stance=r.stance,
-        model=model, as_of_date=as_of_date, status=status,
+        model=model, as_of_date=as_of_date, status=status, adjustments=adjustments,
+        news_count=len(news), notice_count=len(notices),
     )
