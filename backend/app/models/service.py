@@ -16,6 +16,7 @@ from app.core.qlib_adapter import (
     load_pred,
 )
 from app.models.schemas import HorizonPrediction, ScreenItem
+from app.models.recompute import emit_progress, fetch_metrics_chunked, CANDIDATES_WINDOW_K
 
 _log = logging.getLogger(__name__)
 
@@ -276,6 +277,7 @@ def _candidates_cached(
     from app.models.utils import is_st_name, parse_board
 
     pred = load_pred(recorder_id, experiment_name=exp)
+    emit_progress("load", 1, 1, "加载模型预测")
 
     if isinstance(pred, pd.Series):
         df = pred.to_frame(name="score")
@@ -310,6 +312,8 @@ def _candidates_cached(
         from production.post_process import ewma_smooth
         df = ewma_smooth(df, alpha=0.5, score_col="score")
 
+    emit_progress("score", 1, 1, "重算分数 + 排名")
+
     dates = df.index.get_level_values("datetime").unique().sort_values()
     today = dates[-1]
     last_slice = df.xs(today, level="datetime")
@@ -319,8 +323,14 @@ def _candidates_cached(
     items = _build_screen_items(df, top=top, days=days, min_top=min_top, name_map=name_map)
 
     if items:
-        prices = get_latest_close_prices([it.symbol for it in items])
-        metrics = get_filter_metrics([it.symbol for it in items])
+        syms = [it.symbol for it in items]
+        emit_progress("metrics", 0, len(syms), f"正在取行情指标 0/{len(syms)}")
+        prices = get_latest_close_prices(syms)
+        metrics = fetch_metrics_chunked(
+            syms, get_filter_metrics, chunk_size=50,
+            emit=lambda done, total: emit_progress(
+                "metrics", done, total, f"正在取行情指标 {done}/{total}"),
+        )
         for it in items:
             it.last_price = prices.get(it.symbol)
             m = metrics.get(it.symbol, {})
@@ -427,6 +437,9 @@ def _candidates_cached(
         if hd:
             it.horizons = hd
 
+    emit_progress("enrich", 1, 1, "多周期富集 + 校准")
+    window_dates = _window_dates(df, CANDIDATES_WINDOW_K)
+
     # Staleness
     data_stale_days = 0
     data_latest_str = latest_date.isoformat()
@@ -451,6 +464,7 @@ def _candidates_cached(
         "available_models": available_models,
         "active_models": list(score_cols) if score_cols else None,
         "items": [it.model_dump() for it in items],
+        "window_dates": window_dates,
     }
 
 
