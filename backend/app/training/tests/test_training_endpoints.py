@@ -10,7 +10,7 @@ class _FakeManager:
     def __init__(self):
         self._entry = None
 
-    async def run_now(self, session, force=False):
+    async def run_now(self, session, force=False, run_spec=None):
         self._entry = {
             "job_id": "tjob1", "kind": "manual", "status": "running",
             "started_at": "s", "finished_at": None, "error": None, "log_path": None,

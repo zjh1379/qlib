@@ -14,10 +14,18 @@ async def run_training(
     payload: TrainRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    """Start a full retrain (P1). Reuses the shared SchedulerManager so the
-    concurrency lock + trading-hours guard are shared with cron/run-now."""
+    """Start a retrain. Reuses the shared SchedulerManager so the concurrency
+    lock + trading-hours guard are shared with cron/run-now. scope="single"
+    retrains a single algo via `reblend --only <model>`; scope="full" runs the
+    full ensemble pipeline (run_spec=None)."""
+    run_spec = None
+    if payload.scope == "single":
+        if len(payload.models) != 1:
+            from app.core.exceptions import BusinessError
+            raise BusinessError("scope=single requires exactly one model", code="bad_single_models")
+        run_spec = ["reblend", "--only", payload.models[0]]
     try:
-        job_id = await get_manager().run_now(session, force=payload.force)
+        job_id = await get_manager().run_now(session, force=payload.force, run_spec=run_spec)
         return {"status": "started", "job_id": job_id}
     except TradingHoursViolation as exc:
         return {"status": "rejected", "reason": str(exc)}

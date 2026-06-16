@@ -9,8 +9,8 @@ class TrainingProgress(BaseModel):
 
 
 class TrainRequest(BaseModel):
-    # P1: full ensemble only. `scope`/`models` reserved for P3 (single-algo).
-    scope: str = Field("full", description='"full" (P1). Single-algo arrives in P3.')
+    scope: str = Field("full", description='"full" | "single"')
+    models: list[str] = Field(default_factory=list, description='for scope="single": exactly one model id')
     force: bool = Field(False, description="Override the trading-hours guard.")
 
 

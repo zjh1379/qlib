@@ -354,10 +354,15 @@ class SchedulerManager:
             async with _db._session_maker() as session:
                 if phase == "start":
                     from app.training import store
+                    rs = (entry or {}).get("run_spec")
+                    if rs and "reblend" in rs and "--only" in rs:
+                        scope, models = "single", [rs[rs.index("--only") + 1]]
+                    else:
+                        scope, models = "full", None
                     await store.record_run_start(
                         session, job_id=job_id,
                         kind=(entry or {}).get("kind", "manual"),
-                        scope="full", models=None, started_at=now,
+                        scope=scope, models=models, started_at=now,
                     )
                 else:
                     from app.training import store
