@@ -103,11 +103,16 @@ def _run_picks(job_id: str, db_path: str) -> int:
     as_of, picks = _load_picks()
     if not picks:
         return 0
+    # Idempotency cost-gate: skip picks already analyzed ok for this date so a
+    # re-trigger (auto refresh or manual button) only fills gaps. partial/failed
+    # are NOT in the skip set, so they get retried.
+    done = store.existing_ok_symbols(db_path, as_of)
+    todo = [(sym, name, ctx) for sym, name, ctx in picks if sym not in done]
     rows: list = []
     with ThreadPoolExecutor(max_workers=_CONCURRENCY) as ex:
         fut_to_sym = {
             ex.submit(_analyze_symbol, sym, name, ctx, as_of): sym
-            for sym, name, ctx in picks
+            for sym, name, ctx in todo
         }
         for fut, sym in fut_to_sym.items():
             a = fut.result()

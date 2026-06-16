@@ -9,12 +9,12 @@ export interface RiskFlag {
 
 export interface AiAnalysis {
   interpretation: string;
-  risk_flags: RiskFlag[];
+  risk_flags?: RiskFlag[];
   stance: 'favorable' | 'neutral' | 'caution';
   model: string;
   as_of_date: string;
   status: string; // ok | partial | failed
-  adjustments: string[]; // guardrail interventions (audit)
+  adjustments?: string[]; // guardrail interventions (audit) — optional: backend defaults to []
   news_count: number; // provenance: news items fed the model
   notice_count: number; // provenance: announcements fed the model
 }

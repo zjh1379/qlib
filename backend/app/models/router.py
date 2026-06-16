@@ -1,14 +1,17 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.exceptions import BusinessError
 from app.analysis.store import fetch_analyses
-from app.models import service
+from app.models import recompute, service
 from app.models.schemas import (
     CandidatesResponse,
     ExperimentsResponse,
     PredictionHistory,
+    RecomputeJob,
+    RecomputeRequest,
+    RecomputeTriggerResponse,
     RollbackRequest,
     RollbackResponse,
     ScreenResponse,
@@ -130,3 +133,24 @@ async def candidates_endpoint(
         new_items.append({**it, "ai_analysis": a.model_dump() if a is not None else None})
     result["items"] = new_items
     return result
+
+
+@router.post("/candidates/recompute", response_model=RecomputeTriggerResponse)
+def recompute_start(payload: RecomputeRequest):
+    """Start a background recompute of the candidate pool for the given
+    view + models. Warms the lru_cache; the subsequent GET /candidates is a
+    cache hit. Reports progress via GET /candidates/recompute/{job_id}."""
+    return recompute.trigger_recompute(view=payload.view, models=payload.models)
+
+
+@router.get("/candidates/recompute/active", response_model=RecomputeJob | None)
+def recompute_active():
+    return recompute.get_active_job()
+
+
+@router.get("/candidates/recompute/{job_id}", response_model=RecomputeJob)
+def recompute_status(job_id: str):
+    job = recompute.get_job(job_id)
+    if not job:
+        raise HTTPException(404, detail="recompute job not found")
+    return job

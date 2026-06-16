@@ -40,6 +40,27 @@ def upsert_many(db_path: str, rows: list[tuple[str, AiAnalysis]]) -> int:
         conn.close()
 
 
+def existing_ok_symbols(db_path: str, as_of_date: str) -> set[str]:
+    """Symbols already analyzed with status='ok' for as_of_date (sync, worker thread).
+    Idempotency cost-gate: these are skipped on re-trigger. Fail-soft — a missing
+    table / unreadable db returns an empty set so nothing is wrongly skipped."""
+    if not as_of_date:
+        return set()
+    try:
+        conn = sqlite3.connect(db_path, timeout=30)
+        try:
+            cur = conn.execute(
+                "SELECT symbol FROM ai_analysis WHERE as_of_date = ? AND status = 'ok'",
+                (as_of_date,),
+            )
+            return {row[0] for row in cur.fetchall()}
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("existing_ok_symbols failed, treating as none: %s", exc)
+        return set()
+
+
 async def fetch_analyses(
     session: AsyncSession, symbols: list[str], as_of_date: str,
 ) -> dict[str, AiAnalysis]:

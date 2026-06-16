@@ -9,16 +9,17 @@ const STANCE: Record<string, string> = {
 
 export default function AiNotePanel({ analysis }: { analysis?: AiAnalysis | null }) {
   if (!analysis) return <p className="text-xs text-[#6e7681]">暂无当日 AI 解读</p>;
-  const unverified = analysis.risk_flags.filter((f) => !f.verified).length;
+  const flags = analysis.risk_flags ?? [];
+  const unverified = flags.filter((f) => !f.verified).length;
   const provenance =
     `依据 ${analysis.notice_count} 公告 + ${analysis.news_count} 新闻` +
     (unverified > 0 ? ` · ${unverified} 项未核验` : '');
   return (
     <div className="space-y-1 text-sm">
       <p className={STANCE[analysis.stance] ?? STANCE.neutral}>{analysis.interpretation}</p>
-      {analysis.risk_flags.length > 0 && (
+      {flags.length > 0 && (
         <ul className="space-y-0.5">
-          {analysis.risk_flags.map((f, i) => (
+          {flags.map((f, i) => (
             <li key={i} className={cn('text-xs', f.verified ? 'text-[#8b949e]' : 'text-[#6e7681]/70')}>
               <span className={f.verified ? 'text-[#e6edf3]' : 'text-[#6e7681]'}>[{f.type}]</span>{' '}
               {f.reason}

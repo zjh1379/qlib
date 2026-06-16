@@ -42,6 +42,39 @@ def test_trigger_runs_worker_and_persists(monkeypatch, tmp_path):
     assert service.get_status().is_running is False
 
 
+def test_run_picks_skips_already_ok(monkeypatch, tmp_path):
+    db = tmp_path / "app.db"
+    monkeypatch.setattr(service, "_is_enabled", lambda s: True)
+    monkeypatch.setattr(service, "_db_path", lambda s: str(db))
+    monkeypatch.setattr(service, "_top_n", lambda s: 2)
+    monkeypatch.setattr(service, "_load_picks", lambda: (
+        "2026-06-10",
+        [("SH600519", "贵州茅台", {}), ("SZ000001", "平安银行", {})],
+    ))
+    # SH600519 already analyzed ok for this date -> must be skipped (no LLM call)
+    monkeypatch.setattr(service.store, "existing_ok_symbols", lambda path, as_of: {"SH600519"})
+    analyzed_syms: list[str] = []
+
+    def fake_one(symbol, name, ctx, as_of):
+        analyzed_syms.append(symbol)
+        return AiAnalysis(interpretation="n", stance="neutral",
+                          model="m", as_of_date=as_of, status="ok")
+    monkeypatch.setattr(service, "_analyze_symbol", fake_one)
+    captured = {}
+    monkeypatch.setattr(service.store, "upsert_many",
+                        lambda path, rows: captured.update({"n": len(rows)}))
+
+    resp = service.trigger_analysis(reason="data_refresh")
+    for _ in range(50):
+        job = service.get_job(resp.job_id)
+        if job and job.status == "done":
+            break
+        time.sleep(0.05)
+    assert analyzed_syms == ["SZ000001"]   # only the not-yet-done pick was analyzed
+    assert service.get_job(resp.job_id).analyzed == 1
+    assert captured["n"] == 1
+
+
 def test_double_trigger_is_already_running(monkeypatch):
     import threading
     monkeypatch.setattr(service, "_is_enabled", lambda s: True)

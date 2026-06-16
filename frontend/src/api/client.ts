@@ -1,4 +1,4 @@
-import type { paths } from '@/api/types.gen';
+import type { components, paths } from '@/api/types.gen';
 import type { AiAnalysis, AnalysisJob, AnalysisStatus } from '@/analysis/types';
 
 const BASE = ''; // empty in production (same origin); Vite proxy handles /api in dev
@@ -262,6 +262,21 @@ export const api = {
       if (params.models && params.models.length > 0) q.set('models', params.models.join(','));
       const qs = q.toString();
       return request<R>(`/api/models/candidates${qs ? '?' + qs : ''}`);
+    },
+    recompute: (body: { view: string; models: string[] }) => {
+      type R = components['schemas']['RecomputeTriggerResponse'];
+      return request<R>('/api/models/candidates/recompute', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    },
+    recomputeStatus: (jobId: string) => {
+      type R = components['schemas']['RecomputeJob'];
+      return request<R>(`/api/models/candidates/recompute/${encodeURIComponent(jobId)}`);
+    },
+    recomputeActive: () => {
+      type R = components['schemas']['RecomputeJob'];
+      return request<R | null>('/api/models/candidates/recompute/active');
     },
     predictions: (
       symbol: string,

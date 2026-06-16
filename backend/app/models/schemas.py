@@ -48,6 +48,11 @@ class ScreenItem(BaseModel):
     board: str | None = None  # main | gem | star | bj | etf | other
     is_st: bool = False
 
+    # 客户端即时层用：每股最近 K 个交易日的逐日排名/分数（与
+    # CandidatesResponse.window_dates 升序对齐；缺数据为 None）。
+    daily_ranks: list[int | None] = Field(default_factory=list)
+    daily_scores: list[float | None] = Field(default_factory=list)
+
     # AI 分析层 (解读 + 风险旗标) — attached at serving time, None when not yet generated
     ai_analysis: AiAnalysis | None = None
 
@@ -78,6 +83,8 @@ class CandidatesResponse(BaseModel):
     available_models: list[str] = Field(default_factory=list)
     active_models: list[str] | None = None
     items: list[ScreenItem]
+    # 客户端即时持续性/窗口过滤用：最近 K 个交易日（升序 ISO 日期）。
+    window_dates: list[str] = Field(default_factory=list)
     # Multi-horizon UX (T9): which date the predictions are AS-OF, what the
     # latest qlib bin data is, and how stale predictions are vs that data.
     as_of_date: str | None = None
@@ -137,3 +144,30 @@ class RollbackResponse(BaseModel):
     archived_recorder_id: str | None = None
     new_current_recorder_id: str | None = None
     reason: str | None = None
+
+
+class RecomputeProgress(BaseModel):
+    phase: str  # "load" | "score" | "metrics" | "enrich" | "done"
+    percent: int  # 0..100 overall
+    message: str = ""
+
+
+class RecomputeJob(BaseModel):
+    job_id: str
+    status: str  # "running" | "done" | "failed"
+    started_at: str
+    finished_at: str | None = None
+    error: str | None = None
+    view: str = "ensemble"
+    models: list[str] = Field(default_factory=list)
+    progress: RecomputeProgress | None = None
+
+
+class RecomputeRequest(BaseModel):
+    view: str = "ensemble"
+    models: list[str] = Field(default_factory=list)
+
+
+class RecomputeTriggerResponse(BaseModel):
+    status: str  # "started" | "already_running"
+    job_id: str | None = None

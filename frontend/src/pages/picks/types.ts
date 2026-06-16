@@ -1,3 +1,6 @@
+/** Must equal backend CANDIDATES_WINDOW_K. Caps the client window slider. */
+export const WINDOW_K = 20;
+
 export type View = 'ensemble' | 'lightgbm' | 'alstm' | 'tra';
 export type Board = 'main' | 'gem' | 'star' | 'bj' | 'etf';
 export type PctChangeN = 1 | 3 | 5 | 10 | 20;
