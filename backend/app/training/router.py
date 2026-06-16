@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.scheduling.router import get_manager
 from app.scheduling.service import AlreadyRunning, TradingHoursViolation
-from app.training.schemas import TrainingJobStatus, TrainingRunRow, TrainRequest
+from app.training.schemas import PromoteRequest, TrainingJobStatus, TrainingRunRow, TrainRequest
 
 router = APIRouter()
 
@@ -51,3 +51,9 @@ def job_status(job_id: str):
 async def training_runs(session: AsyncSession = Depends(get_session)):
     from app.training.service import build_history
     return await build_history(session)
+
+
+@router.post("/promote")
+def promote(payload: PromoteRequest):
+    from app.models.service import promote_candidate
+    return promote_candidate(payload.recorder_id, candidate_experiment=payload.candidate_experiment)

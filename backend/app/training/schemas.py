@@ -25,6 +25,11 @@ class TrainingJobStatus(BaseModel):
     log_tail: str | None = None
 
 
+class PromoteRequest(BaseModel):
+    recorder_id: str
+    candidate_experiment: str
+
+
 class TrainingRunRow(BaseModel):
     job_id: str | None = None
     kind: str | None = None

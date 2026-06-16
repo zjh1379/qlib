@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from qlib.workflow import R
 
 from app.core.config import Settings
 from app.core.exceptions import NotFoundError
@@ -851,4 +852,40 @@ def rollback_to(target: str = "previous_1") -> dict:
         "archived_recorder_id": ",".join(archived_ids) if archived_ids else None,
         "new_current_recorder_id": new_current,
         "reason": None if archived_ids else "recorder_dir_not_found",
+    }
+
+
+def promote_candidate(
+    recorder_id: str,
+    *,
+    candidate_experiment: str,
+    production_experiment: str | None = None,
+) -> dict:
+    """Load a candidate recorder's pred.pkl and save it as a NEW recorder in the
+    production experiment, making it the newest (served) model. Non-destructive.
+
+    Candidates live in a separate ``<exp>_candidates`` experiment so serving
+    (``get_latest_recorder_id`` on the production experiment) ignores them.
+    PROMOTE copies the chosen candidate's ``pred.pkl`` into a fresh recorder in
+    the production experiment via the mlflow-correct ``R.start`` / ``R.save_objects``
+    path — no directory surgery. The new recorder is the newest one carrying a
+    ``pred.pkl`` in the production experiment, so it becomes the served model.
+    """
+    from datetime import datetime, timezone
+
+    init_qlib_once()
+    from app.core.config import Settings
+
+    prod = production_experiment or Settings().retrain_recorder_experiment
+    rec = R.get_recorder(recorder_id=recorder_id, experiment_name=candidate_experiment)
+    pred = rec.load_object("pred.pkl")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    name = f"promoted_{recorder_id[:8]}_{ts}"
+    with R.start(experiment_name=prod, recorder_name=name):
+        R.save_objects(**{"pred.pkl": pred})
+    return {
+        "status": "promoted",
+        "production_experiment": prod,
+        "new_recorder_name": name,
+        "from_recorder_id": recorder_id,
     }
