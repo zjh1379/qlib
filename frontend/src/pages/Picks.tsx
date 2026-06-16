@@ -15,6 +15,7 @@ import StalenessBanner from './picks/StalenessBanner';
 import TopInfoRow from './picks/TopInfoRow';
 import RiskFlagBadge from './picks/RiskFlagBadge';
 import AiNotePanel from './picks/AiNotePanel';
+import AnalysisRunButton from './picks/AnalysisRunButton';
 import type { FilterParams, View } from './picks/types';
 import { useFilterParams } from './picks/useFilterParams';
 import RecomputeProgress from './picks/RecomputeProgress';
@@ -146,11 +147,14 @@ export default function Picks() {
 
   return (
     <div className="space-y-6 max-w-7xl">
-      <header>
-        <h1 className="text-2xl font-semibold">选股工作台</h1>
-        <p className="text-sm text-[#8b949e] mt-1">
-          基于滚动重训集成模型的横截面打分排名 · 候选池服务器缓存 · 筛选与排序均在浏览器执行
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">选股工作台</h1>
+          <p className="text-sm text-[#8b949e] mt-1">
+            基于滚动重训集成模型的横截面打分排名 · 候选池服务器缓存 · 筛选与排序均在浏览器执行
+          </p>
+        </div>
+        <AnalysisRunButton running={aiJob?.status === 'running'} />
       </header>
 
       {data && (
