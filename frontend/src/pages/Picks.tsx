@@ -15,7 +15,7 @@ import StalenessBanner from './picks/StalenessBanner';
 import TopInfoRow from './picks/TopInfoRow';
 import RiskFlagBadge from './picks/RiskFlagBadge';
 import AiNotePanel from './picks/AiNotePanel';
-import type { FilterParams } from './picks/types';
+import type { FilterParams, View } from './picks/types';
 import { useFilterParams } from './picks/useFilterParams';
 import RecomputeProgress from './picks/RecomputeProgress';
 import { useRecompute } from './picks/useRecompute';
@@ -47,7 +47,14 @@ export default function Picks() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setDraftModels(params.models); }, [params.models.join(',')]);
 
-  const recompute = useRecompute();
+  // Commit a combo to applied (URL) once its recompute finishes warming.
+  // Fires from useRecompute with the job's OWN target combo, so it's not
+  // subject to the warmed-set timing race a status-effect would have.
+  const recompute = useRecompute((view, models) => {
+    if (comboKey(view, models) !== comboKey(params.view, params.models)) {
+      update({ view: view as View, models });
+    }
+  });
   const appliedWarmed = recompute.isWarmed(params.view, params.models);
 
   // Warm the applied combo via the progress job before the heavy GET runs
@@ -69,15 +76,6 @@ export default function Picks() {
     }
     await recompute.start(draftView, draftModels);
   };
-
-  // When a recompute for the DRAFT finishes, commit draft -> applied.
-  useEffect(() => {
-    if (recompute.job?.status === 'done' && recomputeDirty
-        && recompute.isWarmed(draftView, draftModels)) {
-      update({ view: draftView, models: draftModels });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recompute.job?.status]);
 
   const qc = useQueryClient();
   const { data: aiJob } = useQuery({

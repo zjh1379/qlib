@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -30,13 +30,12 @@ vi.mock('@/models/hooks', () => ({
 
 // Mock useRecompute so the applied combo is "warmed" -> the GET-gated rows render,
 // and no real network call fires on mount.
+let capturedOnWarmed: ((view: string, models: string[]) => void) | undefined;
 vi.mock('@/pages/picks/useRecompute', () => ({
-  useRecompute: () => ({
-    isWarmed: () => true,
-    start: async () => {},
-    job: null,
-    elapsedSec: 0,
-  }),
+  useRecompute: (onWarmed?: (view: string, models: string[]) => void) => {
+    capturedOnWarmed = onWarmed;
+    return { isWarmed: () => true, start: async () => {}, job: null, elapsedSec: 0 };
+  },
 }));
 
 function wrap(ui: React.ReactNode) {
@@ -61,5 +60,15 @@ describe('Picks', () => {
   it('recompute button starts disabled (no draft change yet)', () => {
     render(wrap(<Picks />));
     expect(screen.getByRole('button', { name: /重新计算/ })).toBeDisabled();
+  });
+
+  it('commits the warmed combo to applied when a recompute completes (single-click)', () => {
+    render(wrap(<Picks />));
+    // applied view starts at ensemble -> the 视图 select shows 集成 (Ensemble)
+    expect(screen.getByDisplayValue('集成 (Ensemble)')).toBeInTheDocument();
+    // simulate useRecompute finishing a warm for a NEW combo
+    act(() => { capturedOnWarmed?.('alstm', []); });
+    // the page must adopt it -> the 视图 select now shows ALSTM
+    expect(screen.getByDisplayValue('ALSTM')).toBeInTheDocument();
   });
 });
