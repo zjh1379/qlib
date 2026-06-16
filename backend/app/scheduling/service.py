@@ -315,14 +315,17 @@ class SchedulerManager:
                 if entry is not None:
                     entry["status"] = "running"
                     entry["started_at"] = datetime.now(tz=_CST).isoformat()
+                await self._persist_run(job_id=_tracked_job_id, phase="start", entry=entry)
                 try:
                     await self._raw_job_fn(_tracked_job_id, self._log_path_for(_tracked_job_id))
                     if entry is not None:
                         entry["status"] = "done"
+                    await self._persist_run(job_id=_tracked_job_id, phase="done", entry=entry)
                 except Exception as exc:
                     if entry is not None:
                         entry["status"] = "failed"
                         entry["error"] = str(exc)
+                    await self._persist_run(job_id=_tracked_job_id, phase="failed", entry=entry)
                     _log.exception("retrain_subprocess_raised", job_id=_tracked_job_id)
                     raise
                 finally:
@@ -331,6 +334,35 @@ class SchedulerManager:
         finally:
             if self._pending_count > 0:
                 self._pending_count -= 1
+
+    async def _persist_run(self, *, job_id: str, phase: str, entry: dict | None) -> None:
+        """Best-effort write to training_runs. Never raises (DB optional)."""
+        from app.core import db as _db
+        if _db._session_maker is None:
+            return
+        try:
+            from datetime import datetime as _dt
+            now = _dt.now(tz=_CST).isoformat()
+            async with _db._session_maker() as session:
+                if phase == "start":
+                    from app.training import store
+                    await store.record_run_start(
+                        session, job_id=job_id,
+                        kind=(entry or {}).get("kind", "manual"),
+                        scope="full", models=None, started_at=now,
+                    )
+                else:
+                    from app.training import store
+                    from app.training.service import latest_recorder_id
+                    log_path = (entry or {}).get("log_path")
+                    rid = latest_recorder_id(Path(log_path)) if log_path else None
+                    await store.record_run_finish(
+                        session, job_id=job_id, status=phase,
+                        recorder_id=rid, error=(entry or {}).get("error"),
+                        finished_at=now,
+                    )
+        except Exception:
+            _log.warning("persist_training_run_failed", job_id=job_id, phase=phase, exc_info=True)
 
     def _install_job(self, schedule: RetrainScheduleRead) -> None:
         trigger = CronTrigger(
