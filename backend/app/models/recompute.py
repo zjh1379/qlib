@@ -80,3 +80,80 @@ def fetch_metrics_chunked(
         if emit is not None:
             emit(done, total)
     return out
+
+
+_MAX_JOBS = 20
+_JOBS: "OrderedDict[str, RecomputeJob]" = OrderedDict()
+_ACTIVE_ID: str | None = None
+_LOCK = threading.Lock()
+
+
+def get_job(job_id: str) -> RecomputeJob | None:
+    return _JOBS.get(job_id)
+
+
+def get_active_job() -> RecomputeJob | None:
+    if _ACTIVE_ID and _ACTIVE_ID in _JOBS:
+        return _JOBS[_ACTIVE_ID]
+    return None
+
+
+def trigger_recompute(view: str, models: list[str]) -> RecomputeTriggerResponse:
+    global _ACTIVE_ID
+    with _LOCK:
+        if _ACTIVE_ID and _ACTIVE_ID in _JOBS and _JOBS[_ACTIVE_ID].status == "running":
+            return RecomputeTriggerResponse(status="already_running", job_id=_ACTIVE_ID)
+        job_id = uuid.uuid4().hex[:12]
+        _JOBS[job_id] = RecomputeJob(
+            job_id=job_id, status="running",
+            started_at=datetime.utcnow().isoformat(),
+            view=view, models=list(models),
+            progress=RecomputeProgress(phase="load", percent=0, message="开始重算"),
+        )
+        _JOBS.move_to_end(job_id)
+        while len(_JOBS) > _MAX_JOBS:
+            old_id, _ = _JOBS.popitem(last=False)
+            log.debug("evicted_old_recompute_job %s", old_id)
+        _ACTIVE_ID = job_id
+
+    threading.Thread(target=_run_recompute, args=(job_id, view, list(models)),
+                     daemon=True).start()
+    return RecomputeTriggerResponse(status="started", job_id=job_id)
+
+
+def _run_recompute(job_id: str, view: str, models: list[str]) -> None:
+    global _ACTIVE_ID
+    from app.models import service  # lazy import: avoids circular import
+
+    def sink(p: RecomputeProgress) -> None:
+        with _LOCK:
+            j = _JOBS.get(job_id)
+            if j:
+                j.progress = p
+
+    _progress_local.sink = sink
+    try:
+        models_csv = ",".join(models) if models else None
+        # Warm the lru_cache. View+models drive the heavy path; cache hit = instant.
+        service.candidates(
+            top=CANDIDATES_POOL_CAP, days=CANDIDATES_WINDOW_K, min_top=0,
+            view=view, models=models_csv,
+        )
+        with _LOCK:
+            j = _JOBS.get(job_id)
+            if j:
+                j.status = "done"
+                j.finished_at = datetime.utcnow().isoformat()
+                j.progress = RecomputeProgress(phase="done", percent=100, message="完成")
+    except Exception as exc:  # noqa: BLE001 — record any failure on the job
+        log.exception("recompute_failed job_id=%s: %s", job_id, exc)
+        with _LOCK:
+            j = _JOBS.get(job_id)
+            if j:
+                j.status = "failed"
+                j.finished_at = datetime.utcnow().isoformat()
+                j.error = str(exc)[:2000]
+    finally:
+        _progress_local.sink = None
+        with _LOCK:
+            _ACTIVE_ID = None
