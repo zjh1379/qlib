@@ -108,6 +108,13 @@ def _name_map() -> dict[str, str]:
     return out
 
 
+def _window_dates(df: "pd.DataFrame", k: int) -> list[str]:
+    """Ascending ISO dates of the last `k` trading days present in df's index."""
+    dates = df.index.get_level_values("datetime").unique().sort_values()
+    return [d.date().isoformat() if hasattr(d, "date") else str(d)[:10]
+            for d in dates[-k:]]
+
+
 def _build_screen_items(
     df: "pd.DataFrame",
     top: int,
@@ -129,6 +136,22 @@ def _build_screen_items(
         .rank(ascending=False, method="min")
         .astype(int)
     )
+
+    # Per-symbol daily rank/score over the window, for client-side
+    # persistence/window filtering. Pivot once; reindex to the window order.
+    _rank_pivot = window_df["rank"].unstack("instrument").reindex(index=window)
+    _score_pivot = window_df["score"].unstack("instrument").reindex(index=window)
+
+    def _col_list(pivot, sym, as_int):
+        if sym not in pivot.columns:
+            return [None] * len(window)
+        out = []
+        for v in pivot[sym].tolist():
+            if pd.isna(v):
+                out.append(None)
+            else:
+                out.append(int(v) if as_int else float(v))
+        return out
 
     last_day = window[-1]
     per_symbol = (
@@ -179,6 +202,8 @@ def _build_screen_items(
                 days_in_top=int(row["days_in_top"]),
                 consensus=consensus,
                 base_scores=base_scores,
+                daily_ranks=_col_list(_rank_pivot, symbol, True),
+                daily_scores=_col_list(_score_pivot, symbol, False),
             )
         )
     return items
