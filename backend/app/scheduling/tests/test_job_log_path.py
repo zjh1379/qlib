@@ -7,6 +7,8 @@ from app.scheduling.service import SchedulerManager
 
 @pytest.mark.asyncio
 async def test_run_now_sets_log_path_and_invokes_job_with_it(tmp_path, monkeypatch):
+    import app.core.db as _db
+    monkeypatch.setattr(_db, "_session_maker", None)
     captured = {}
 
     async def fake_job(job_id: str, log_path: Path) -> None:
@@ -34,7 +36,10 @@ async def test_run_now_sets_log_path_and_invokes_job_with_it(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_job_raising_marks_failed(tmp_path):
+async def test_job_raising_marks_failed(tmp_path, monkeypatch):
+    import app.core.db as _db
+    monkeypatch.setattr(_db, "_session_maker", None)
+
     async def boom(job_id: str, log_path: Path) -> None:
         raise RuntimeError("rolling_train exited 1")
 
