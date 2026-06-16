@@ -17,3 +17,10 @@ def test_emit_progress_defaults_empty_message(capsys):
     payload = json.loads(out[len("PROGRESS "):])
     assert payload["message"] == ""
     assert payload["phase"] == "done"
+
+
+def test_emit_recorder_prints_recorder_line(capsys):
+    from production.progress import emit_recorder
+    emit_recorder("abc123def")
+    out = capsys.readouterr().out.strip()
+    assert out == "RECORDER abc123def"

@@ -54,7 +54,7 @@ import yaml
 from production.consensus import consensus_per_row, write_pred_pkl
 from production.pit_constituents import load_or_refresh, members_on
 from production.post_process import ewma_smooth
-from production.progress import emit_progress
+from production.progress import emit_progress, emit_recorder
 from production.walk_forward import HorizonConfig, split
 
 _log = logging.getLogger("rolling_train")
@@ -539,6 +539,10 @@ def run_once(
         from qlib.workflow import R
         from production.train_helpers import is_live_fold
         with R.start(experiment_name=cfg.experiment_name, recorder_name=f"ensemble_{end_date}"):
+            try:
+                emit_recorder(R.get_recorder().id)
+            except Exception:
+                pass
             if is_live_fold(end_date):
                 R.save_objects(**{"pred.pkl": out})
                 _log.info("seeded_serving_pred recorder=ensemble_%s rows=%d", end_date, len(out))

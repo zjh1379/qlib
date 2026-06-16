@@ -28,3 +28,9 @@ def emit_progress(phase: str, current: int, total: int, message: str = "") -> No
     # flush=True: the backend tails this promptly even though a retrain runs for
     # many minutes and Python would otherwise buffer stdout when not a tty.
     print("PROGRESS " + json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def emit_recorder(recorder_id: str) -> None:
+    """Emit the produced recorder id so the backend can link a training run to
+    its recorder (parsed from the per-job log alongside PROGRESS lines)."""
+    print(f"RECORDER {recorder_id}", flush=True)
