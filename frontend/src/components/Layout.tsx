@@ -17,6 +17,7 @@ export default function Layout() {
           <NavLink to="/portfolio">持仓</NavLink>
           <NavLink to="/evaluation">评估</NavLink>
           <NavLink to="/settings">设置</NavLink>
+          <NavLink to="/training">训练工作台</NavLink>
         </nav>
         <div className="flex-1 max-w-md ml-auto">
           <SymbolSearch size="sm" placeholder="搜索股票…" />

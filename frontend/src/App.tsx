@@ -9,6 +9,7 @@ import Picks from '@/pages/Picks';
 import Portfolio from '@/pages/Portfolio';
 import PortfolioTransactions from '@/pages/PortfolioTransactions';
 import Settings from '@/pages/Settings';
+import Training from '@/pages/Training';
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="/evaluation/compare" element={<EvaluationCompare />} />
         <Route path="/evaluation/:recorderId" element={<EvaluationDetail />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/training" element={<Training />} />
       </Route>
     </Routes>
   );
