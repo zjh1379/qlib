@@ -103,6 +103,14 @@ async def _list_runs(session):
     return await store.list_runs(session)
 
 
+def _is_candidate(rec) -> bool:
+    if rec is None:
+        return False
+    exp = str(getattr(rec, "experiment", "") or "")
+    name = str(getattr(rec, "run_name", "") or "")
+    return exp.endswith("_candidates") or name.startswith("candidate_")
+
+
 async def build_history(session) -> list[TrainingRunRow]:
     """Union of training_runs (all attempts) with recorder summaries (metrics).
     Runs are enriched by matching recorder_id; recorders without a run row are
@@ -127,6 +135,8 @@ async def build_history(session) -> list[TrainingRunRow]:
             run_name=getattr(rec, "run_name", None),
             ic_mean=getattr(rec, "ic_mean", None), ir=getattr(rec, "ir", None),
             acceptance_passed=getattr(rec, "acceptance_passed", None),
+            experiment=getattr(rec, "experiment", None),
+            is_candidate=_is_candidate(rec),
         ))
     for rec in recs:
         if rec.recorder_id in linked:
@@ -135,6 +145,7 @@ async def build_history(session) -> list[TrainingRunRow]:
             status="historical", recorder_id=rec.recorder_id, run_name=rec.run_name,
             created_at=rec.created_at, ic_mean=rec.ic_mean, ir=rec.ir,
             acceptance_passed=rec.acceptance_passed,
+            experiment=rec.experiment, is_candidate=_is_candidate(rec),
         ))
     rows.sort(key=lambda r: r.created_at or "", reverse=True)
     return rows

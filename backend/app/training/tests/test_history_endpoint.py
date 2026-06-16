@@ -46,3 +46,36 @@ async def test_runs_endpoint_merges_runs_and_recorders(monkeypatch):
     assert by_id["recA"]["ic_mean"] == 0.04
     assert by_id["j2"]["status"] == "failed" and by_id["j2"]["recorder_id"] is None
     assert by_id["recOld"]["status"] == "historical"
+
+
+@pytest.mark.asyncio
+async def test_runs_endpoint_marks_candidates(monkeypatch):
+    from app.training import service as svc
+
+    async def fake_list_runs(session, limit=100):
+        return []
+
+    class _Rec:
+        def __init__(self, **k): self.__dict__.update(k)
+    recs = [
+        _Rec(recorder_id="recCand", experiment="rolling_v2_ensemble_candidates",
+             run_name="candidate_lgbm_2026-06-16", created_at="2026-06-16T03:00:00",
+             pred_start=None, pred_end=None, pred_rows=None, has_eval=False,
+             ic_mean=None, ir=None, acceptance_passed=None),
+        _Rec(recorder_id="recProd", experiment="rolling_v2_ensemble",
+             run_name="ensemble_2026-06-16", created_at="2026-06-16T02:00:00",
+             pred_start=None, pred_end=None, pred_rows=None, has_eval=True,
+             ic_mean=0.04, ir=2.0, acceptance_passed=True),
+    ]
+    monkeypatch.setattr(svc, "_list_runs", fake_list_runs, raising=False)
+    monkeypatch.setattr(svc, "list_recorders_with_summary", lambda: recs, raising=False)
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: None
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.get("/api/training/runs")
+    rows = {row["recorder_id"]: row for row in r.json()}
+    assert rows["recCand"]["is_candidate"] is True
+    assert rows["recCand"]["experiment"] == "rolling_v2_ensemble_candidates"
+    assert rows["recProd"]["is_candidate"] is False

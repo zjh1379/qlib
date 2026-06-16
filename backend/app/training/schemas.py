@@ -44,3 +44,5 @@ class TrainingRunRow(BaseModel):
     ic_mean: float | None = None
     ir: float | None = None
     acceptance_passed: bool | None = None
+    experiment: str | None = None
+    is_candidate: bool = False
