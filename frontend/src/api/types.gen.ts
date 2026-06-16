@@ -38,6 +38,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ops/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Memory
+         * @description System + per-process memory snapshot.
+         *
+         *     Added 2026-05-29 after diagnosing Windows commit-charge exhaustion
+         *     causing hard freezes. Reports:
+         *       - System: RAM total/used, pagefile total/used, commit %
+         *       - Project processes: RSS/VMS for backend / vite / training subprocs
+         *       - Heaviest other python.exe / chrome.exe / claude.exe for context
+         *
+         *     Frontend `ActiveJobsBadge` polls this and shows a red banner when
+         *     commit > 85%, so the user can react before another freeze.
+         */
+        get: operations["memory_api_ops_memory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/data/status": {
         parameters: {
             query?: never;
@@ -313,8 +342,66 @@ export interface paths {
          * @description Return the full candidate pool (cached per recorder + view + models + base params).
          *     Frontend fetches this ONCE, then applies filter + sort client-side. No filter
          *     query params here — Tier 1 filters apply in the browser.
+         *     AI analysis (interpretation + risk flags) is LEFT-JOINed from the store at
+         *     serving time onto copied item dicts so the lru-cached pool is never mutated.
          */
         get: operations["candidates_endpoint_api_models_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models/candidates/recompute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recompute Start
+         * @description Start a background recompute of the candidate pool for the given
+         *     view + models. Warms the lru_cache; the subsequent GET /candidates is a
+         *     cache hit. Reports progress via GET /candidates/recompute/{job_id}.
+         */
+        post: operations["recompute_start_api_models_candidates_recompute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models/candidates/recompute/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recompute Active */
+        get: operations["recompute_active_api_models_candidates_recompute_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models/candidates/recompute/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recompute Status */
+        get: operations["recompute_status_api_models_candidates_recompute__job_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -516,6 +603,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analysis/active/peek": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Active Peek */
+        get: operations["active_peek_api_analysis_active_peek_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analysis/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_analysis_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analysis/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job */
+        get: operations["get_job_api_analysis_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analysis/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Now */
+        post: operations["run_now_api_analysis_run_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analysis/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get For Symbol */
+        get: operations["get_for_symbol_api_analysis__symbol__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/internal/analysis/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Internal Refresh */
+        post: operations["internal_refresh_api_internal_analysis_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduling/retrain": {
         parameters: {
             query?: never;
@@ -592,23 +781,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/{full_path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Serve Spa */
-        get: operations["serve_spa__full_path__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -643,6 +815,70 @@ export interface components {
             message: string;
         };
         /**
+         * AiAnalysis
+         * @description Served packet attached to a ScreenItem.
+         */
+        AiAnalysis: {
+            /** Interpretation */
+            interpretation: string;
+            /** Risk Flags */
+            risk_flags?: components["schemas"]["RiskFlag"][];
+            /**
+             * Stance
+             * @default neutral
+             * @enum {string}
+             */
+            stance: "favorable" | "neutral" | "caution";
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+            /**
+             * As Of Date
+             * @default
+             */
+            as_of_date: string;
+            /**
+             * Status
+             * @default ok
+             */
+            status: string;
+        };
+        /** AnalysisJob */
+        AnalysisJob: {
+            /** Job Id */
+            job_id: string;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Analyzed */
+            analyzed?: number | null;
+            /** As Of Date */
+            as_of_date?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** AnalysisStatus */
+        AnalysisStatus: {
+            /** Last Run At */
+            last_run_at?: string | null;
+            /** Last Success At */
+            last_success_at?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Is Running
+             * @default false
+             */
+            is_running: boolean;
+        };
+        /**
          * CandidatesResponse
          * @description Same shape as ScreenResponse; semantically a 'no filters applied' candidate pool
          *     intended for client-side filter + sort. Returned by GET /api/models/candidates.
@@ -669,6 +905,8 @@ export interface components {
             active_models?: string[] | null;
             /** Items */
             items: components["schemas"]["ScreenItem"][];
+            /** Window Dates */
+            window_dates?: string[];
             /** As Of Date */
             as_of_date?: string | null;
             /** Data Latest Date */
@@ -1093,6 +1331,56 @@ export interface components {
              */
             message: string;
         };
+        /** RecomputeJob */
+        RecomputeJob: {
+            /** Job Id */
+            job_id: string;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * View
+             * @default ensemble
+             */
+            view: string;
+            /** Models */
+            models?: string[];
+            progress?: components["schemas"]["RecomputeProgress"] | null;
+        };
+        /** RecomputeProgress */
+        RecomputeProgress: {
+            /** Phase */
+            phase: string;
+            /** Percent */
+            percent: number;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+        };
+        /** RecomputeRequest */
+        RecomputeRequest: {
+            /**
+             * View
+             * @default ensemble
+             */
+            view: string;
+            /** Models */
+            models?: string[];
+        };
+        /** RecomputeTriggerResponse */
+        RecomputeTriggerResponse: {
+            /** Status */
+            status: string;
+            /** Job Id */
+            job_id?: string | null;
+        };
         /**
          * RecorderSummary
          * @description Lightweight summary for the list view. Computed without full eval.
@@ -1207,6 +1495,22 @@ export interface components {
             minute: number;
             /** Enabled */
             enabled: boolean;
+        };
+        /** RiskFlag */
+        RiskFlag: {
+            /** Type */
+            type: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "high" | "medium" | "low";
+            /** Reason */
+            reason: string;
+            /** Source */
+            source: string;
+            /** Source Date */
+            source_date: string;
         };
         /** RollbackRequest */
         RollbackRequest: {
@@ -1332,6 +1636,11 @@ export interface components {
              * @default false
              */
             is_st: boolean;
+            /** Daily Ranks */
+            daily_ranks?: (number | null)[];
+            /** Daily Scores */
+            daily_scores?: (number | null)[];
+            ai_analysis?: components["schemas"]["AiAnalysis"] | null;
         };
         /** ScreenResponse */
         ScreenResponse: {
@@ -1514,6 +1823,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    memory_api_ops_memory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
@@ -2075,6 +2406,90 @@ export interface operations {
             };
         };
     };
+    recompute_start_api_models_candidates_recompute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecomputeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecomputeTriggerResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recompute_active_api_models_candidates_recompute_active_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecomputeJob"] | null;
+                };
+            };
+        };
+    };
+    recompute_status_api_models_candidates_recompute__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecomputeJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_recorders_api_evaluation_recorders_get: {
         parameters: {
             query?: never;
@@ -2337,6 +2752,148 @@ export interface operations {
             };
         };
     };
+    active_peek_api_analysis_active_peek_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisJob"] | null;
+                };
+            };
+        };
+    };
+    status_api_analysis_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisStatus"];
+                };
+            };
+        };
+    };
+    get_job_api_analysis_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_now_api_analysis_run_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerResponse"];
+                };
+            };
+        };
+    };
+    get_for_symbol_api_analysis__symbol__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiAnalysis"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    internal_refresh_api_internal_analysis_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerResponse"];
+                };
+            };
+        };
+    };
     get_schedule_api_scheduling_retrain_get: {
         parameters: {
             query?: never;
@@ -2468,37 +3025,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-        };
-    };
-    serve_spa__full_path__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                full_path: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

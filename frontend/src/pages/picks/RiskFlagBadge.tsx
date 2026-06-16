@@ -8,18 +8,19 @@ const SEV: Record<string, string> = {
 };
 
 export default function RiskFlagBadge({ analysis }: { analysis?: AiAnalysis | null }) {
-  if (!analysis || analysis.risk_flags.length === 0) return null;
-  const worst = analysis.risk_flags.some((f) => f.severity === 'high')
+  const flags = analysis?.risk_flags ?? [];
+  if (!analysis || flags.length === 0) return null;
+  const worst = flags.some((f) => f.severity === 'high')
     ? 'high'
-    : analysis.risk_flags.some((f) => f.severity === 'medium')
+    : flags.some((f) => f.severity === 'medium')
       ? 'medium'
       : 'low';
   return (
     <span
       className={cn('inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs', SEV[worst])}
-      title={analysis.risk_flags.map((f) => `${f.type}: ${f.reason}`).join('\n')}
+      title={flags.map((f) => `${f.type}: ${f.reason}`).join('\n')}
     >
-      🚩 {analysis.risk_flags.length}
+      🚩 {flags.length}
     </span>
   );
 }

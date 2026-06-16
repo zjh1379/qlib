@@ -8,7 +8,7 @@ export interface RiskFlag {
 
 export interface AiAnalysis {
   interpretation: string;
-  risk_flags: RiskFlag[];
+  risk_flags?: RiskFlag[];
   stance: 'favorable' | 'neutral' | 'caution';
   model: string;
   as_of_date: string;
