@@ -61,6 +61,31 @@ async def test_fetch_empty_inputs(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_existing_ok_symbols_filters_by_status_and_date(tmp_path):
+    db = tmp_path / "app.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    store.upsert_many(str(db), [
+        ("SH600519", _mk("SH600519", status="ok")),
+        ("SZ000001", _mk("SZ000001", status="partial")),  # partial -> retryable, not skipped
+    ])
+    other = _mk("SH600036", status="ok")
+    other.as_of_date = "2026-06-09"                        # different date
+    store.upsert_many(str(db), [("SH600036", other)])
+
+    got = store.existing_ok_symbols(str(db), "2026-06-10")
+    assert got == {"SH600519"}
+    await engine.dispose()
+
+
+def test_existing_ok_symbols_missing_table_returns_empty(tmp_path):
+    # No table created — must degrade to "nothing done yet", not raise.
+    db = tmp_path / "app.db"
+    assert store.existing_ok_symbols(str(db), "2026-06-10") == set()
+
+
+@pytest.mark.asyncio
 async def test_fetch_analyses_missing_table_returns_empty(tmp_path):
     # Table NOT created (no create_all) — simulates pre-migration environment.
     db = tmp_path / "app.db"
