@@ -124,6 +124,57 @@ class RollingConfig:
     universe_extras: list[str] | None = None
 
 
+def _stack_score(base_preds: pd.DataFrame, oof_labels: pd.Series, *, ewma_alpha: float = 0.5) -> pd.DataFrame:
+    """Fit the Ridge stacker on OOF (base_preds rows overlapping oof_labels dates)
+    and score the full base_preds. Pure: no qlib/IO. Mirrors run_once's ensemble math."""
+    from production.ensemble_stacker import RidgeStacker
+    from production.ensemble_rank_avg import rank_average
+    try:
+        valid_mask = base_preds.index.get_level_values("datetime").isin(
+            oof_labels.index.get_level_values("datetime").unique()
+        )
+        valid_base = base_preds[valid_mask]
+        stacker = RidgeStacker().fit_oof(valid_base, oof_labels)
+        unified = stacker.predict_with_fallback(base_preds).rename("score")
+    except Exception as exc:
+        _log.warning("stacker_failed_using_rank_average error=%s", str(exc))
+        unified = (-rank_average(base_preds)).rename("score")
+    out = base_preds.copy()
+    out["score"] = unified
+    out["consensus"] = consensus_per_row(base_preds)
+    out = ewma_smooth(out, alpha=ewma_alpha, score_col="score")
+    return out
+
+
+def pool_stack_write(
+    cfg: "RollingConfig", series_list: list[pd.Series], end_date: date, members: list[str],
+    *, experiment_name: str, recorder_name: str, seed_serving: bool,
+) -> Path:
+    """Concat base series, refit stacker on the 5d valid window, write pred.pkl,
+    and persist a recorder under experiment_name. Used by reblend_single (candidate exp)."""
+    from qlib.data import D
+    from qlib.workflow import R
+    base_preds = pd.concat(series_list, axis=1).dropna(how="all")
+    h5 = next(h for h in cfg.horizons if h.name == "5d")
+    s_5 = split(end_date=end_date, cfg=h5)
+    labels = D.features(instruments=members, fields=["Ref($open, -6) / Ref($open, -1) - 1"],
+                        start_time=str(s_5.valid_start), end_time=str(s_5.valid_end))
+    labels.columns = ["y"]
+    labels.index.names = ["instrument", "datetime"]
+    labels = labels.swaplevel("instrument", "datetime").sort_index()["y"]
+    out = _stack_score(base_preds, labels, ewma_alpha=cfg.ewma_alpha)
+    pred_path = REPO_ROOT / "examples" / "mlruns" / f"pred_{recorder_name}.pkl"
+    write_pred_pkl(out, pred_path)
+    with R.start(experiment_name=experiment_name, recorder_name=recorder_name):
+        try:
+            emit_recorder(R.get_recorder().id)
+        except Exception:
+            pass
+        if seed_serving:
+            R.save_objects(**{"pred.pkl": out})
+    return pred_path
+
+
 def load_config(path: Path) -> RollingConfig:
     # Explicit UTF-8 — Windows locale (GBK) chokes on non-ASCII comments
     # (e.g. arrow/multiplication-sign in smoke configs).
