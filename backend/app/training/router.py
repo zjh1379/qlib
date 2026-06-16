@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.scheduling.router import get_manager
 from app.scheduling.service import AlreadyRunning, TradingHoursViolation
-from app.training.schemas import TrainingJobStatus, TrainRequest
+from app.training.schemas import TrainingJobStatus, TrainingRunRow, TrainRequest
 
 router = APIRouter()
 
@@ -37,3 +37,9 @@ def job_status(job_id: str):
     from app.training.service import build_job_status
     entry = get_manager().get_job_status(job_id)
     return build_job_status(entry) if entry is not None else None
+
+
+@router.get("/runs", response_model=list[TrainingRunRow])
+async def training_runs(session: AsyncSession = Depends(get_session)):
+    from app.training.service import build_history
+    return await build_history(session)

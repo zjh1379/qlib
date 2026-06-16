@@ -23,3 +23,19 @@ class TrainingJobStatus(BaseModel):
     error: str | None = None
     progress: TrainingProgress | None = None
     log_tail: str | None = None
+
+
+class TrainingRunRow(BaseModel):
+    job_id: str | None = None
+    kind: str | None = None
+    scope: str | None = None
+    status: str                       # pending|running|done|failed|skipped|historical
+    started_at: str | None = None
+    finished_at: str | None = None
+    created_at: str | None = None
+    recorder_id: str | None = None
+    run_name: str | None = None
+    error: str | None = None
+    ic_mean: float | None = None
+    ir: float | None = None
+    acceptance_passed: bool | None = None

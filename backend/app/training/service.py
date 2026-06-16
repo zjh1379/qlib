@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.training.schemas import TrainingJobStatus, TrainingProgress
+from app.evaluation.service import list_recorders_with_summary
+from app.training import store
+from app.training.schemas import TrainingJobStatus, TrainingProgress, TrainingRunRow
 
 
 def tail_log(log_path: Path, n_lines: int = 50) -> str | None:
@@ -95,3 +97,44 @@ def build_job_status(entry: dict) -> TrainingJobStatus:
         progress=progress,
         log_tail=log_tail,
     )
+
+
+async def _list_runs(session):
+    return await store.list_runs(session)
+
+
+async def build_history(session) -> list[TrainingRunRow]:
+    """Union of training_runs (all attempts) with recorder summaries (metrics).
+    Runs are enriched by matching recorder_id; recorders without a run row are
+    appended as status='historical'. Sorted newest-first by created_at."""
+    runs = await _list_runs(session)
+    try:
+        recs = list_recorders_with_summary()
+    except Exception:
+        recs = []
+    rec_by_id = {r.recorder_id: r for r in recs}
+    rows: list[TrainingRunRow] = []
+    linked: set[str] = set()
+    for run in runs:
+        rec = rec_by_id.get(run.recorder_id) if run.recorder_id else None
+        if rec is not None:
+            linked.add(run.recorder_id)
+        rows.append(TrainingRunRow(
+            job_id=run.job_id, kind=run.kind, scope=run.scope, status=run.status,
+            started_at=run.started_at, finished_at=run.finished_at,
+            created_at=str(run.created_at) if run.created_at is not None else None,
+            recorder_id=run.recorder_id, error=run.error,
+            run_name=getattr(rec, "run_name", None),
+            ic_mean=getattr(rec, "ic_mean", None), ir=getattr(rec, "ir", None),
+            acceptance_passed=getattr(rec, "acceptance_passed", None),
+        ))
+    for rec in recs:
+        if rec.recorder_id in linked:
+            continue
+        rows.append(TrainingRunRow(
+            status="historical", recorder_id=rec.recorder_id, run_name=rec.run_name,
+            created_at=rec.created_at, ic_mean=rec.ic_mean, ir=rec.ir,
+            acceptance_passed=rec.acceptance_passed,
+        ))
+    rows.sort(key=lambda r: r.created_at or "", reverse=True)
+    return rows
