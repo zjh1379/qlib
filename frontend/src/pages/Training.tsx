@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useActiveTrainingJob, useStartTraining, useTrainingRuns, useRollback } from '@/training/hooks';
+import { useActiveTrainingJob, useStartTraining, useTrainingRuns, useRollback, usePromote } from '@/training/hooks';
 import { toast } from '@/jobs/toast';
 import { useCompare } from '@/pages/evaluation/hooks';
 import { CompareCard } from '@/pages/evaluation/CompareCard';
@@ -30,6 +30,9 @@ export default function Training() {
   const running = job?.status === 'running' || job?.status === 'pending';
   const runs = useTrainingRuns();
   const rollback = useRollback();
+  const promote = usePromote();
+  const [scope, setScope] = useState<'full' | 'single'>('full');
+  const [singleModel, setSingleModel] = useState<'lgbm' | 'alstm' | 'tra'>('lgbm');
   const [selected, setSelected] = useState<string[]>([]);
   const toggle = (rid: string) =>
     setSelected((prev) =>
@@ -43,12 +46,35 @@ export default function Training() {
       {/* 训练 section */}
       <section className="rounded-lg border border-[#30363d] p-4 space-y-3">
         <h2 className="text-sm font-medium text-[#8b949e]">训练</h2>
+        <div className="flex items-center gap-3 text-xs">
+          <label className="flex items-center gap-1">
+            <input type="radio" name="scope" checked={scope === 'full'} onChange={() => setScope('full')} /> 全量集成
+          </label>
+          <label className="flex items-center gap-1">
+            <input type="radio" name="scope" checked={scope === 'single'} onChange={() => setScope('single')} /> 单算法
+          </label>
+          {scope === 'single' && (
+            <select
+              className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-xs"
+              value={singleModel}
+              onChange={(e) => setSingleModel(e.target.value as 'lgbm' | 'alstm' | 'tra')}
+            >
+              <option value="lgbm">LGBM</option>
+              <option value="alstm">ALSTM</option>
+              <option value="tra">TRA</option>
+            </select>
+          )}
+        </div>
         <button
           className="px-3 py-1.5 rounded bg-[#1f6feb] text-white text-sm disabled:opacity-50"
           disabled={running || start.isPending}
-          onClick={() => start.mutate({ scope: 'full', force: false })}
+          onClick={() =>
+            start.mutate(scope === 'single'
+              ? { scope: 'single', models: [singleModel], force: false }
+              : { scope: 'full', force: false })
+          }
         >
-          {running ? '训练进行中…' : '立即训练(全量)'}
+          {running ? '训练进行中…' : scope === 'single' ? `训练 ${singleModel.toUpperCase()}` : '立即训练(全量)'}
         </button>
         {start.data?.status === 'rejected' && (
           <p className="text-xs text-amber-400">已拒绝:{start.data.reason}</p>
@@ -141,6 +167,7 @@ export default function Training() {
                   <th className="p-2 text-right">IC</th>
                   <th className="p-2 text-right">IR</th>
                   <th className="p-2 text-center">验收</th>
+                  <th className="p-2 text-center">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -163,6 +190,27 @@ export default function Training() {
                       <td className="p-2 text-right font-mono">{fmt(row.ic_mean)}</td>
                       <td className="p-2 text-right font-mono">{fmt(row.ir, 2)}</td>
                       <td className="p-2 text-center">{row.acceptance_passed == null ? '—' : row.acceptance_passed ? '✓' : '✗'}</td>
+                      <td className="p-2 text-center">
+                        {row.is_candidate && row.recorder_id && row.experiment ? (
+                          <button
+                            className="px-2 py-0.5 rounded text-xs bg-[#238636] text-white hover:bg-[#2ea043] disabled:opacity-50"
+                            disabled={promote.isPending}
+                            onClick={() => {
+                              if (confirm(`将候选 ${row.run_name ?? row.recorder_id} 设为当前生产模型？`)) {
+                                promote.mutate(
+                                  { recorder_id: row.recorder_id as string, candidate_experiment: row.experiment as string },
+                                  {
+                                    onSuccess: (r) => toast.success(`已上线:${r.new_recorder_name ?? r.status}`),
+                                    onError: (e) => toast.error(`上线失败:${String((e as Error)?.message ?? e)}`),
+                                  },
+                                );
+                              }
+                            }}
+                          >
+                            {promote.isPending ? '上线中…' : '设为当前'}
+                          </button>
+                        ) : null}
+                      </td>
                     </tr>
                   );
                 })}
