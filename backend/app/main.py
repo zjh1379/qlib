@@ -22,6 +22,7 @@ from app.ops.router import router as ops_router
 from app.portfolio.router import router as portfolio_router
 from app.scheduling.router import router as scheduling_router, set_manager
 from app.scheduling.service import SchedulerManager, make_subprocess_retrain_job
+from app.training.router import router as training_router
 
 
 @asynccontextmanager
@@ -46,7 +47,7 @@ async def lifespan(app: FastAPI):
         repo_root=repo_root,
     )
 
-    manager = SchedulerManager(retrain_job)
+    manager = SchedulerManager(retrain_job, logs_dir=repo_root / "logs")
     set_manager(manager)
     from app.core import db as _db
     if _db._session_maker is None:
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis_router)
     app.include_router(analysis_internal_router)
     app.include_router(scheduling_router, prefix="/api/scheduling", tags=["scheduling"])
+    app.include_router(training_router, prefix="/api/training", tags=["training"])
 
     # Static serving of the built frontend (created in T18; tolerated if missing)
     static_dir = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"

@@ -3,6 +3,46 @@ import type { AiAnalysis, AnalysisJob, AnalysisStatus } from '@/analysis/types';
 
 const BASE = ''; // empty in production (same origin); Vite proxy handles /api in dev
 
+export interface TrainingProgress {
+  phase: string;
+  current: number;
+  total: number;
+  message: string;
+}
+
+export interface TrainingJobStatus {
+  job_id: string;
+  kind: 'cron' | 'manual';
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  progress: TrainingProgress | null;
+  log_tail: string | null;
+}
+
+export interface StartTrainingResponse {
+  status: 'started' | 'rejected';
+  job_id?: string;
+  reason?: string;
+}
+
+export interface TrainingRunRow {
+  job_id: string | null;
+  kind: string | null;
+  scope: string | null;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'historical';
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+  recorder_id: string | null;
+  run_name: string | null;
+  error: string | null;
+  ic_mean: number | null;
+  ir: number | null;
+  acceptance_passed: boolean | null;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -358,5 +398,16 @@ export const api = {
       const q = new URLSearchParams({ force: String(force) });
       return request<R>(`/api/scheduling/retrain/run-now?${q.toString()}`, { method: 'POST' });
     },
+  },
+  training: {
+    run: (force = false) =>
+      request<StartTrainingResponse>('/api/training/run', {
+        method: 'POST',
+        body: JSON.stringify({ scope: 'full', force }),
+      }),
+    active: () => request<TrainingJobStatus | null>('/api/training/jobs/active'),
+    status: (jobId: string) =>
+      request<TrainingJobStatus | null>(`/api/training/jobs/${encodeURIComponent(jobId)}`),
+    runs: () => request<TrainingRunRow[]>('/api/training/runs'),
   },
 };

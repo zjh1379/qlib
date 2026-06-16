@@ -4,6 +4,7 @@ export interface RiskFlag {
   reason: string;
   source: string;
   source_date: string;
+  verified: boolean; // guardrail: source matched a provided news/notice + valid date
 }
 
 export interface AiAnalysis {
@@ -13,6 +14,9 @@ export interface AiAnalysis {
   model: string;
   as_of_date: string;
   status: string; // ok | partial | failed
+  adjustments?: string[]; // guardrail interventions (audit) — optional: backend defaults to []
+  news_count: number; // provenance: news items fed the model
+  notice_count: number; // provenance: announcements fed the model
 }
 
 export interface AnalysisJob {

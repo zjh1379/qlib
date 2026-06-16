@@ -781,6 +781,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/training/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Training
+         * @description Start a full retrain (P1). Reuses the shared SchedulerManager so the
+         *     concurrency lock + trading-hours guard are shared with cron/run-now.
+         */
+        post: operations["run_training_api_training_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training/jobs/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Active Job */
+        get: operations["active_job_api_training_jobs_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Job Status */
+        get: operations["job_status_api_training_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/training/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Training Runs */
+        get: operations["training_runs_api_training_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -844,6 +916,18 @@ export interface components {
              * @default ok
              */
             status: string;
+            /** Adjustments */
+            adjustments?: string[];
+            /**
+             * News Count
+             * @default 0
+             */
+            news_count: number;
+            /**
+             * Notice Count
+             * @default 0
+             */
+            notice_count: number;
         };
         /** AnalysisJob */
         AnalysisJob: {
@@ -1511,6 +1595,11 @@ export interface components {
             source: string;
             /** Source Date */
             source_date: string;
+            /**
+             * Verified
+             * @default true
+             */
+            verified: boolean;
         };
         /** RollbackRequest */
         RollbackRequest: {
@@ -1656,6 +1745,98 @@ export interface components {
             universe_size: number;
             /** Items */
             items: components["schemas"]["ScreenItem"][];
+        };
+        /** TrainRequest */
+        TrainRequest: {
+            /**
+             * Scope
+             * @description "full" (P1). Single-algo arrives in P3.
+             * @default full
+             */
+            scope: string;
+            /**
+             * Force
+             * @description Override the trading-hours guard.
+             * @default false
+             */
+            force: boolean;
+        };
+        /** TrainingJobStatus */
+        TrainingJobStatus: {
+            /** Job Id */
+            job_id: string;
+            /**
+             * Kind
+             * @description "cron" | "manual"
+             */
+            kind: string;
+            /**
+             * Status
+             * @description "pending" | "running" | "done" | "failed" | "skipped"
+             */
+            status: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Error */
+            error?: string | null;
+            progress?: components["schemas"]["TrainingProgress"] | null;
+            /** Log Tail */
+            log_tail?: string | null;
+        };
+        /** TrainingProgress */
+        TrainingProgress: {
+            /**
+             * Phase
+             * @description "universe" | "train" | "ensemble" | "done" (or future phases)
+             */
+            phase: string;
+            /**
+             * Current
+             * @description Current step (1-based); equals total when finished
+             */
+            current: number;
+            /**
+             * Total
+             * @description Total steps for this run
+             */
+            total: number;
+            /**
+             * Message
+             * @description Human-readable status line, e.g. 'training lgbm'
+             * @default
+             */
+            message: string;
+        };
+        /** TrainingRunRow */
+        TrainingRunRow: {
+            /** Job Id */
+            job_id?: string | null;
+            /** Kind */
+            kind?: string | null;
+            /** Scope */
+            scope?: string | null;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Recorder Id */
+            recorder_id?: string | null;
+            /** Run Name */
+            run_name?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Ic Mean */
+            ic_mean?: number | null;
+            /** Ir */
+            ir?: number | null;
+            /** Acceptance Passed */
+            acceptance_passed?: boolean | null;
         };
         /** Transaction */
         Transaction: {
@@ -3025,6 +3206,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    run_training_api_training_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrainRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    active_job_api_training_jobs_active_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingJobStatus"] | null;
+                };
+            };
+        };
+    };
+    job_status_api_training_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingJobStatus"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    training_runs_api_training_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingRunRow"][];
                 };
             };
         };

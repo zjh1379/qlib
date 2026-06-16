@@ -8,8 +8,10 @@ const SEV: Record<string, string> = {
 };
 
 export default function RiskFlagBadge({ analysis }: { analysis?: AiAnalysis | null }) {
-  const flags = analysis?.risk_flags ?? [];
-  if (!analysis || flags.length === 0) return null;
+  // Only verified flags drive the badge — an unverified (ungrounded) flag must
+  // not raise a false alarm. Verification happens server-side in guardrails.
+  const flags = (analysis?.risk_flags ?? []).filter((f) => f.verified);
+  if (flags.length === 0) return null;
   const worst = flags.some((f) => f.severity === 'high')
     ? 'high'
     : flags.some((f) => f.severity === 'medium')
