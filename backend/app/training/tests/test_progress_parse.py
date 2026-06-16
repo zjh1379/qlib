@@ -48,3 +48,22 @@ def test_build_job_status_handles_missing_log_path(tmp_path: Path):
     st = build_job_status(entry)
     assert st.progress is None
     assert st.log_tail is None
+
+
+def test_latest_recorder_id_parses_recorder_line(tmp_path):
+    from app.training.service import latest_recorder_id
+    log = tmp_path / "j.log"
+    log.write_text(
+        "PROGRESS {\"phase\":\"done\",\"current\":6,\"total\":6,\"message\":\"done\"}\n"
+        "RECORDER rec_abc\n",
+        encoding="utf-8",
+    )
+    assert latest_recorder_id(log) == "rec_abc"
+
+
+def test_latest_recorder_id_none_when_absent(tmp_path):
+    from app.training.service import latest_recorder_id
+    log = tmp_path / "j.log"
+    log.write_text("no recorder here\n", encoding="utf-8")
+    assert latest_recorder_id(log) is None
+    assert latest_recorder_id(tmp_path / "missing.log") is None

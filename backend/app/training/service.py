@@ -54,6 +54,28 @@ def latest_progress(log_path: Path) -> TrainingProgress | None:
         return None
 
 
+def latest_recorder_id(log_path: Path) -> str | None:
+    """Return the recorder id from the last 'RECORDER <id>' line, or None."""
+    if not log_path.is_file():
+        return None
+    try:
+        with log_path.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            read_size = min(size, 32 * 1024)
+            f.seek(size - read_size)
+            data = f.read()
+        text = data.decode("utf-8", errors="replace")
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if line.startswith("RECORDER "):
+                rid = line[len("RECORDER "):].strip()
+                return rid or None
+        return None
+    except Exception:
+        return None
+
+
 def build_job_status(entry: dict) -> TrainingJobStatus:
     """Enrich a SchedulerManager job entry with parsed progress + log tail."""
     log_path_str = entry.get("log_path")
