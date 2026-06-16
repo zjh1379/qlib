@@ -63,7 +63,7 @@ export function FilterBar({
       </div>
 
       {/* Group 1.5: 模型 / 视图 — 需重新计算 */}
-      <div className="rounded-md border border-[#30363d] bg-[#0d1117] p-3 space-y-3">
+      <div className="rounded-md border border-[#30363d] bg-[#161b22] p-3 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-[10px] text-[#6e7681] uppercase tracking-wider">模型 / 视图 · 需重新计算</h3>
           <button

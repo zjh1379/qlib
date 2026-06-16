@@ -16,7 +16,7 @@ from app.core.qlib_adapter import (
     load_pred,
 )
 from app.models.schemas import HorizonPrediction, ScreenItem
-from app.models.recompute import emit_progress, fetch_metrics_chunked, CANDIDATES_WINDOW_K
+from app.models.recompute import emit_progress, CANDIDATES_WINDOW_K
 
 _log = logging.getLogger(__name__)
 
@@ -324,16 +324,18 @@ def _candidates_cached(
 
     if items:
         syms = [it.symbol for it in items]
-        emit_progress("metrics", 0, len(syms), f"正在取行情指标 0/{len(syms)}")
-        prices = get_latest_close_prices(syms)
-        metrics = fetch_metrics_chunked(
-            syms, get_filter_metrics, chunk_size=50,
-            emit=lambda done, total: emit_progress(
-                "metrics", done, total, f"正在取行情指标 {done}/{total}"),
-        )
+        # ONE D.features call carries the metrics phase. It has a large fixed
+        # per-call overhead (~30s, near-constant across 10..300 symbols —
+        # profiled 2026-06-16), so: (a) we do NOT chunk it (chunking = one call
+        # per chunk ≈ 6x slower); (b) last_price is taken from this same fetch
+        # (metrics['last_close']) instead of a second get_latest_close_prices
+        # call, which would double the dominant cost (~68s → ~35s).
+        emit_progress("metrics", 0, 10, f"正在取 {len(syms)} 只行情指标…")
+        metrics = get_filter_metrics(syms)
+        emit_progress("metrics", 10, 10, "行情指标就绪")
         for it in items:
-            it.last_price = prices.get(it.symbol)
             m = metrics.get(it.symbol, {})
+            it.last_price = m.get("last_close")
             it.pct_change_1d = m.get("pct_change_1d")
             it.pct_change_3d = m.get("pct_change_3d")
             it.pct_change_5d = m.get("pct_change_5d")

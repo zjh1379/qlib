@@ -18,7 +18,6 @@ import threading
 import uuid
 from collections import OrderedDict
 from datetime import datetime
-from typing import Callable
 
 from app.models.schemas import (
     RecomputeJob,
@@ -32,12 +31,14 @@ log = logging.getLogger(__name__)
 CANDIDATES_WINDOW_K = 20
 CANDIDATES_POOL_CAP = 300
 
-# phase -> (lo, hi) overall-percent band. Tune after profiling.
+# phase -> (lo, hi) overall-percent band. Profiled 2026-06-16: metrics (one
+# ~30s get_filter_metrics call) dominates wall-clock; load ~2s, score/enrich
+# sub-second. So metrics owns most of the bar.
 _PHASE_BOUNDS: dict[str, tuple[int, int]] = {
-    "load": (0, 15),
-    "score": (15, 30),
-    "metrics": (30, 90),
-    "enrich": (90, 100),
+    "load": (0, 10),
+    "score": (10, 15),
+    "metrics": (15, 92),
+    "enrich": (92, 100),
 }
 
 # Thread-local progress sink. Set by the recompute thread; unset (None) on
@@ -59,27 +60,6 @@ def emit_progress(phase: str, current: int, total: int, message: str) -> None:
         return
     sink(RecomputeProgress(phase=phase, percent=phase_percent(phase, current, total),
                            message=message))
-
-
-def fetch_metrics_chunked(
-    symbols: list[str],
-    fetch_fn: Callable[[list[str]], dict],
-    chunk_size: int = 50,
-    emit: Callable[[int, int], None] | None = None,
-) -> dict:
-    """Call fetch_fn over `symbols` in batches, merging results and reporting
-    per-batch progress via `emit(done, total)`. Splitting the one big
-    D.features call into batches adds negligible overhead but gives the
-    progress bar real, smooth movement during the dominant phase."""
-    out: dict = {}
-    total = len(symbols)
-    for i in range(0, total, chunk_size):
-        batch = symbols[i:i + chunk_size]
-        out.update(fetch_fn(batch))
-        done = min(i + chunk_size, total)
-        if emit is not None:
-            emit(done, total)
-    return out
 
 
 _MAX_JOBS = 20
