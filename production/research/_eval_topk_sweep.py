@@ -32,8 +32,9 @@ import pandas as pd
 OOF_FAC = "production/reports/oof_lgbmfac_2021_2026.pkl"
 OOF_2MODEL = "production/reports/oof_2model_2021_2026.pkl"
 CONFIG = "production/configs/rolling_ensemble.yaml"
-PERIOD, CAPITAL, PROFILE = 5, 100_000.0, "small"
-TOP_KS = [5, 10, 15, 20, 30]
+PERIOD, PROFILE = 5, "small"
+CAPITALS = [10_000.0, 100_000.0]
+TOP_KS = [1, 2, 3, 5, 10, 15, 20, 30]
 
 
 def _calmar(m):
@@ -49,12 +50,12 @@ def _num(x, nd=2):
     return "n/a" if x is None or not np.isfinite(x) else f"{x:.{nd}f}"
 
 
-def _daily(scores, fwd, k):
+def _daily(scores, fwd, k, capital):
     from production.backtest.engine import run_backtest
     from production.backtest.rebalance import FixedPeriod
     from production.backtest.costs import cost_model
     return run_backtest(scores, fwd, FixedPeriod(top_k=k, period=PERIOD),
-                        cost_model(PROFILE), capital=CAPITAL)["daily"]
+                        cost_model(PROFILE), capital=capital)["daily"]
 
 
 def _paired_t(a, b):
@@ -76,7 +77,7 @@ def _paired_t(a, b):
 def main() -> int:
     Path("logs").mkdir(exist_ok=True)
     from production.score_utils import score_of as _score_of, rebuild_2model as _rebuild_2model
-    from production.backtest.metrics_net import net_metrics
+    from production.backtest.metrics_net import net_metrics, tail_stats
     fac = pd.read_pickle(OOF_FAC)
     two = pd.read_pickle(OOF_2MODEL)
     factor_2m = _rebuild_2model(fac, two)
@@ -91,41 +92,39 @@ def main() -> int:
     fwd = load_fwd_returns(insts, start, end, config_path=CONFIG)
     years = sorted({d.year for d in dts})
 
-    hdr = (f"{'top_k':>5} {'net_cagr':>9} {'net_ir':>7} {'max_dd':>8} {'Calmar':>7} "
-           f"{'turnov':>7} {'cost/yr':>8} {'win':>6} {'neg_yrs':>7} {'t':>6} {'p':>7}")
-    print("FACTOR-2MODEL — top_k concentration sweep (fixed/5d, ¥100k, small cost)")
-    print("=" * len(hdr)); print(hdr); print("-" * len(hdr))
-
     out = {}
-    per_year_rows = []
-    for k in TOP_KS:
-        fd = _daily(factor_2m, fwd, k)
-        bd = _daily(base_2m, fwd, k)
-        m = net_metrics(fd)
-        cal = _calmar(m)
-        # per-year
-        yr = {}
-        for y in years:
-            sub = fd.loc[pd.to_datetime(fd.index).year == y]
-            yr[y] = net_metrics(sub)["net_cagr"]
-        neg = sum(1 for y in years if np.isfinite(yr[y]) and yr[y] < 0)
-        t, p = _paired_t(fd["net"], bd["net"])
-        out[k] = {"metrics": m, "calmar": cal, "per_year": yr, "neg_years": neg, "t": t, "p": p}
-        per_year_rows.append((k, yr))
-        print(f"{k:>5} {_pct(m['net_cagr']):>9} {_num(m['net_ir']):>7} {_pct(m['max_drawdown']):>8} "
-              f"{_num(cal):>7} {_num(m['avg_turnover'],3):>7} {_pct(m['cost_drag_annual']):>8} "
-              f"{_pct(m['win_rate']):>6} {neg:>7} {_num(t):>6} {_num(p,4):>7}")
-
-    print("\nPER-YEAR net_cagr by top_k (factor-2model):")
-    yhdr = f"{'top_k':>5} " + " ".join(f"{y:>8}" for y in years)
-    print(yhdr); print("-" * len(yhdr))
-    for k, yr in per_year_rows:
-        print(f"{k:>5} " + " ".join(f"{_pct(yr[y]):>8}" for y in years))
+    for capital in CAPITALS:
+        hdr = (f"{'top_k':>5} {'net_cagr':>9} {'net_ir':>7} {'max_dd':>8} {'Calmar':>7} "
+               f"{'turnov':>7} {'cost/yr':>8} {'win':>6} {'p10':>8} {'std':>7} {'neg%':>6} "
+               f"{'neg_yr':>6} {'t':>6} {'p':>7}")
+        print(f"\nFACTOR-2MODEL — top_k sweep (fixed/5d, Y{capital:,.0f}, {PROFILE} cost)")
+        print("=" * len(hdr)); print(hdr); print("-" * len(hdr))
+        cap_out = {}
+        for k in TOP_KS:
+            fd = _daily(factor_2m, fwd, k, capital)
+            bd = _daily(base_2m, fwd, k, capital)
+            m = net_metrics(fd)
+            cal = _calmar(m)
+            ts = tail_stats(fd["net"])
+            yr = {}
+            for y in years:
+                sub = fd.loc[pd.to_datetime(fd.index).year == y]
+                yr[y] = net_metrics(sub)["net_cagr"]
+            neg = sum(1 for y in years if np.isfinite(yr[y]) and yr[y] < 0)
+            t, p = _paired_t(fd["net"], bd["net"])
+            cap_out[k] = {"metrics": m, "calmar": cal, "tail": ts, "per_year": yr,
+                          "neg_years": neg, "t": t, "p": p}
+            print(f"{k:>5} {_pct(m['net_cagr']):>9} {_num(m['net_ir']):>7} "
+                  f"{_pct(m['max_drawdown']):>8} {_num(cal):>7} {_num(m['avg_turnover'],3):>7} "
+                  f"{_pct(m['cost_drag_annual']):>8} {_pct(m['win_rate']):>6} "
+                  f"{_pct(ts['ret_p10']):>8} {_num(ts['ret_std'],4):>7} "
+                  f"{_pct(ts['neg_period_pct']):>6} {neg:>6} {_num(t):>6} {_num(p,4):>7}")
+        out[f"capital_{int(capital)}"] = cap_out
 
     Path("logs/eval_topk_sweep_summary.json").write_text(
         json.dumps(out, indent=2, default=float), encoding="utf-8")
     print("\nwrote logs/eval_topk_sweep_summary.json")
-    print("(t/p = paired daily-net t-test factor-2model vs baseline-2model at that top_k)")
+    print("(p10/std/neg% = per-DAY net left-tail; t/p = paired daily-net vs baseline at that k)")
     return 0
 
 
