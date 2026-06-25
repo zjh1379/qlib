@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     ai_analysis_top_n: int = 10           # analyze the top-N picks per run
     ai_analysis_enabled: bool = False     # off until a provider key is set
 
+    # Nightly unattended inference (off by default). Runs daily_inference under
+    # the 'aggressive' resource profile at the chosen local hour, guarded by
+    # the existing trading-hours check + single-run lock.
+    nightly_inference_enabled: bool = False
+    nightly_inference_hour: int = 2     # 02:00 local
+
     @property
     def db_url(self) -> str:
         path = Path(self.app_db_path).expanduser().resolve()
