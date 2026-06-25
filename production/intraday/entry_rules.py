@@ -79,6 +79,13 @@ def entry_multiplier(day_bars: pd.DataFrame, prev_close: float, instrument: str,
         first = day_bars["low"].iloc[:first_n]
         pos_first = first[first > 0]
         price = float(pos_first.min()) if len(pos_first) else o
+    elif rule == "am30_vwap":
+        # realistic "bought sometime in the first 30 min" = VWAP of the first
+        # first_n bars (6 = 30 min). Non-look-ahead (achievable by spreading buys).
+        bars = day_bars.iloc[:first_n]
+        valid = bars[(bars["volume"] > 0) & (bars["amount"] > 0)]
+        vol = float(valid["volume"].sum())
+        price = float(valid["amount"].sum()) / vol if vol > 0 else o
     else:
         raise ValueError(f"unknown rule {rule!r}")
     return price / o if o > 0 else None

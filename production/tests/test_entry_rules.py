@@ -64,6 +64,15 @@ def test_first30_low_uses_min_first6_bars():
     assert entry_multiplier(d, 9.9, "SH600000", rule="first30_low") == pytest.approx(0.98)
 
 
+def test_am30_vwap_uses_first_30min_vwap_only():
+    # 8 bars; first 6 (=30min) vwap=11 (close 11, vol 100); last 2 (close 20) excluded
+    opens = [10, 11, 11, 11, 11, 11, 20, 20]
+    closes = [11, 11, 11, 11, 11, 11, 20, 20]
+    d = _day(opens, [21] * 8, [9] * 8, closes, [100] * 8)
+    # vwap(first6) = (11*100*6)/(100*6) = 11 ; day-open = 10 -> mult 1.1
+    assert entry_multiplier(d, 9.5, "SH600000", rule="am30_vwap") == pytest.approx(1.1)
+
+
 def test_one_zi_limit_up_not_fillable():
     # 一字涨停: whole day at limit (open=high=low=close=11.0=prev*1.1) -> buy unfillable
     d = _day([11.0, 11.0], [11.0, 11.0], [11.0, 11.0], [11.0, 11.0], [100, 100])
