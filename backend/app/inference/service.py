@@ -75,6 +75,7 @@ def trigger_inference(
     force: bool = False,
     end_date: date | None = None,
     reason: str = "manual",
+    profile_name: str = "conservative",
 ) -> TriggerResponse:
     """Start daily_inference subprocess if not already running."""
     global _ACTIVE_JOB_ID, _LAST_RUN_AT
@@ -100,14 +101,14 @@ def trigger_inference(
     # Spawn outside the lock
     thread = threading.Thread(
         target=_run_subprocess,
-        args=(job_id, end_date, force, reason),
+        args=(job_id, end_date, force, reason, profile_name),
         daemon=True,
     )
     thread.start()
     return TriggerResponse(status="started", job_id=job_id)
 
 
-def _run_subprocess(job_id: str, end_date: date | None, force: bool, reason: str):
+def _run_subprocess(job_id: str, end_date: date | None, force: bool, reason: str, profile_name: str = "conservative"):
     global _ACTIVE_JOB_ID, _LAST_SUCCESS_AT, _LAST_ERROR
 
     cmd = [sys.executable, "-m", "production.daily_inference"]
@@ -129,7 +130,7 @@ def _run_subprocess(job_id: str, end_date: date | None, force: bool, reason: str
     rc: int | None = None
     err_tail: str = ""
     try:
-        profile = PROFILES["conservative"]  # manual/UI inference keeps desktop responsive
+        profile = PROFILES.get(profile_name, PROFILES["conservative"])
         with log_path.open("wb") as logf:
             proc = subprocess.Popen(
                 cmd, cwd=str(REPO_ROOT),
