@@ -43,3 +43,20 @@ def test_net_regime_splits():
     assert len(segs) == 2
     for _, m in segs.items():
         assert "net_ir" in m
+
+
+def test_tail_stats_basic():
+    from production.backtest.metrics_net import tail_stats
+    s = pd.Series([-0.10, -0.02, 0.01, 0.03, 0.20])
+    out = tail_stats(s)
+    assert out["worst"] == pytest.approx(-0.10)
+    assert out["neg_period_pct"] == pytest.approx(0.4)
+    assert out["n"] == 5
+    assert out["ret_p10"] == pytest.approx(float(s.quantile(0.10)))
+
+
+def test_tail_stats_empty_is_nan():
+    from production.backtest.metrics_net import tail_stats
+    out = tail_stats(pd.Series([], dtype=float))
+    assert out["n"] == 0
+    assert out["worst"] != out["worst"]  # nan

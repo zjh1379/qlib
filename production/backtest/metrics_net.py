@@ -60,3 +60,22 @@ def net_regime(daily: pd.DataFrame, segments: list[tuple[str, str]] | None = Non
             continue
         out[f"{start}__{end}"] = net_metrics(sub, periods_per_year)
     return out
+
+
+def tail_stats(net) -> dict:
+    """Left-tail / variance diagnostics for a per-period net-return Series — how
+    brutal a concentrated (top-1/2) book is. `net` = engine daily ledger 'net' col
+    (or any return Series)."""
+    r = pd.Series(net).dropna()
+    if r.empty:
+        return {"ret_p05": float("nan"), "ret_p10": float("nan"),
+                "ret_std": float("nan"), "neg_period_pct": float("nan"),
+                "worst": float("nan"), "n": 0}
+    return {
+        "ret_p05": float(r.quantile(0.05)),
+        "ret_p10": float(r.quantile(0.10)),
+        "ret_std": float(r.std(ddof=1)) if len(r) > 1 else float("nan"),
+        "neg_period_pct": float((r < 0).mean()),
+        "worst": float(r.min()),
+        "n": int(len(r)),
+    }
