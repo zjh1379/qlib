@@ -111,8 +111,7 @@ def record_kill(path, record: dict) -> None:
     if path is None:
         return
     try:
-        import time as _t
-        rec = {"ts": _t.strftime("%Y-%m-%dT%H:%M:%S"), **record}
+        rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), **record}
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         with p.open("a", encoding="utf-8") as f:
@@ -211,7 +210,7 @@ def main() -> int:
             action = decide_action(
                 pct, used_gb, total_gb,
                 warn_pct=args.warn_pct, kill_pct=args.kill_pct,
-                floor_gb=getattr(args, "floor_gb", 4.0),
+                floor_gb=args.floor_gb,
             )
             if action == "kill":
                 target = _find_heaviest_killable()
@@ -219,7 +218,7 @@ def main() -> int:
                     _kill_with_grace(
                         target,
                         reason=f"commit {pct:.1f}% / free {total_gb-used_gb:.1f}GB crossed limits",
-                        kills_path=getattr(args, "kills_path", None),
+                        kills_path=args.kills_path,
                     )
                     consecutive_kill_attempts += 1
                     if consecutive_kill_attempts > 3:
@@ -228,7 +227,11 @@ def main() -> int:
                         consecutive_kill_attempts = 0
                 else:
                     if now - last_warn_at > 30:
-                        log.warning("commit %.1f%% CRITICAL but no killable training proc", pct)
+                        log.warning(
+                            "commit %.1f%% CRITICAL but no killable training proc — "
+                            "consider closing browser tabs or rebooting",
+                            pct,
+                        )
                         last_warn_at = now
             elif action == "warn":
                 consecutive_kill_attempts = 0
