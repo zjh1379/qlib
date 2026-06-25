@@ -108,6 +108,7 @@ class SchedulerManager:
     """
 
     JOB_ID = "retrain_weekly"
+    NIGHTLY_JOB_ID = "nightly_inference"
 
     def __init__(self, job_fn: JobCallable, logs_dir: Path | None = None):
         self._scheduler = AsyncIOScheduler()
@@ -339,6 +340,31 @@ class SchedulerManager:
         finally:
             if self._pending_count > 0:
                 self._pending_count -= 1
+
+    def install_nightly_inference(self, *, enabled: bool, hour: int) -> None:
+        """Install (or remove) a daily cron that runs daily_inference under the
+        aggressive profile. Idempotent. Trading-hours guard applies at fire time."""
+        try:
+            self._scheduler.remove_job(self.NIGHTLY_JOB_ID)
+        except JobLookupError:
+            pass
+        if not enabled:
+            return
+        self._scheduler.add_job(
+            self._run_nightly_inference,
+            trigger=CronTrigger(hour=hour, minute=0),
+            id=self.NIGHTLY_JOB_ID,
+            replace_existing=True,
+        )
+
+    async def _run_nightly_inference(self) -> None:
+        from app.inference import service as inf
+        now = datetime.now(tz=_CST)
+        if is_trading_hours_cst(now):
+            _log.warning("nightly_inference_skipped_trading_hours")
+            return
+        _log.info("nightly_inference_trigger")
+        inf.trigger_inference(reason="nightly_scheduled", profile_name="aggressive")
 
     def _install_job(self, schedule: RetrainScheduleRead) -> None:
         trigger = CronTrigger(

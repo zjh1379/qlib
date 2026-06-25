@@ -60,6 +60,10 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("DB singletons not initialized — init_db_singletons() must run before scheduling start")
     async with _db._session_maker() as session:
         await manager.start(session)
+    manager.install_nightly_inference(
+        enabled=settings.nightly_inference_enabled,
+        hour=settings.nightly_inference_hour,
+    )
 
     log.info("app_started", port=settings.api_port)
     yield
