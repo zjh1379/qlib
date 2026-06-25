@@ -94,6 +94,10 @@ def load_entry_ohlc(instruments, start: str, end: str,
     names = ["entry_open", "entry_high", "entry_low", "prev_close"]
     df = QlibDataLoader(config={"feature": (fields, names)}).load(
         instruments=instruments, start_time=start, end_time=end)
+    # QlibDataLoader returns MultiIndex/expression-named columns (it does not honor the
+    # `names` as flat labels), so force our names by position — same spirit as
+    # load_fwd_returns' positional df.iloc[:, 0]. Order matches the `fields` list.
+    df.columns = names
     if df.index.names[0] == "instrument":
         df = df.swaplevel().sort_index()
     df.index = df.index.set_names(["datetime", "instrument"])
