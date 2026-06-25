@@ -34,10 +34,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import signal
 import sys
 import time
+from pathlib import Path
 from typing import Optional
 
 import psutil
@@ -103,6 +105,22 @@ def decide_action(
     return "ok"
 
 
+def record_kill(path, record: dict) -> None:
+    """Append one JSON line describing a watchdog kill. Fail-soft; path=None
+    skips. The backend tails this file to surface 'killed by OOM guard'."""
+    if path is None:
+        return
+    try:
+        import time as _t
+        rec = {"ts": _t.strftime("%Y-%m-%dT%H:%M:%S"), **record}
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def _find_heaviest_killable() -> Optional[psutil.Process]:
     """Walk all processes, return the heaviest one whose cmdline matches
     KILLABLE_TOKENS. Returns None if no killable training process found.
@@ -125,12 +143,12 @@ def _find_heaviest_killable() -> Optional[psutil.Process]:
     return best
 
 
-def _kill_with_grace(p: psutil.Process, reason: str) -> None:
+def _kill_with_grace(p: psutil.Process, reason: str, kills_path=None) -> None:
     try:
-        log.error("KILLING pid=%d rss=%.1fGB cmd=%s — %s",
-                  p.pid, p.memory_info().rss / 2**30,
-                  " ".join(p.cmdline())[:200], reason)
-        # Kill children first so they don't reparent to init
+        rss_gb = p.memory_info().rss / 2**30
+        cmd = " ".join(p.cmdline())[:200]
+        log.error("KILLING pid=%d rss=%.1fGB cmd=%s — %s", p.pid, rss_gb, cmd, reason)
+        record_kill(kills_path, {"pid": p.pid, "rss_gb": round(rss_gb, 2), "cmd": cmd, "reason": reason})
         for ch in p.children(recursive=True):
             try:
                 ch.terminate()
@@ -197,6 +215,7 @@ def main() -> int:
                     _kill_with_grace(
                         target,
                         reason=f"commit {pct:.1f}% / free {total_gb-used_gb:.1f}GB crossed limits",
+                        kills_path=getattr(args, "kills_path", None),
                     )
                     consecutive_kill_attempts += 1
                     if consecutive_kill_attempts > 3:

@@ -1,5 +1,6 @@
 """Tests for production/safety_watchdog.py hardening (P0.1–P0.4)."""
-from production.safety_watchdog import decide_action, is_killable_cmd
+import json
+from production.safety_watchdog import decide_action, is_killable_cmd, record_kill
 
 
 def test_decide_action_ok_when_low():
@@ -35,3 +36,22 @@ def test_is_killable_protects_infra():
     assert not is_killable_cmd("uvicorn app.main:app --port 8000")
     assert not is_killable_cmd("node vite")
     assert not is_killable_cmd("chrome.exe --type=renderer")
+
+
+# ---------------------------------------------------------------------------
+# P0.3 — record_kill
+# ---------------------------------------------------------------------------
+
+def test_record_kill_appends_json_line(tmp_path):
+    p = tmp_path / "watchdog_kills.jsonl"
+    record_kill(p, {"pid": 123, "rss_gb": 11.2, "cmd": "python -m production.train_alstm", "reason": "floor"})
+    record_kill(p, {"pid": 456, "rss_gb": 9.0, "cmd": "x", "reason": "pct"})
+    lines = p.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+    rec = json.loads(lines[0])
+    assert rec["pid"] == 123 and rec["reason"] == "floor"
+    assert "ts" in rec
+
+
+def test_record_kill_none_path_is_noop():
+    record_kill(None, {"pid": 1})
