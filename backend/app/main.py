@@ -23,6 +23,7 @@ from app.portfolio.router import router as portfolio_router
 from app.scheduling.router import router as scheduling_router, set_manager
 from app.scheduling.service import SchedulerManager, make_subprocess_retrain_job
 from app.training.router import router as training_router
+from app.core.watchdog_supervisor import start_watchdog, stop_watchdog
 
 
 @asynccontextmanager
@@ -37,11 +38,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning("qlib_not_ready_at_boot", error=str(e))
 
+    repo_root = Path(__file__).resolve().parent.parent.parent
+
+    # Always-on OOM watchdog (last line of defense against commit-charge
+    # exhaustion -> Windows hard freeze). Fail-soft: never blocks startup.
+    watchdog_proc = start_watchdog(settings.retrain_python_path, repo_root)
+
     # Scheduler manager — the real retrain runs `production.rolling_train run-once`
     # in a *subprocess* so the FastAPI event loop is never blocked by the 1.5–4
     # hours of CPU/GPU work. (The subprocess script is delivered in T10 onwards;
     # before T10 lands the job will exit non-zero but never crash the API.)
-    repo_root = Path(__file__).resolve().parent.parent.parent
     retrain_job = make_subprocess_retrain_job(
         python_path=settings.retrain_python_path,
         repo_root=repo_root,
@@ -58,6 +64,7 @@ async def lifespan(app: FastAPI):
     log.info("app_started", port=settings.api_port)
     yield
     await manager.stop()
+    stop_watchdog(watchdog_proc)
     await dispose_db_singletons()
     log.info("app_stopped")
 
