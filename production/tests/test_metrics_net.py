@@ -60,3 +60,30 @@ def test_tail_stats_empty_is_nan():
     out = tail_stats(pd.Series([], dtype=float))
     assert out["n"] == 0
     assert out["worst"] != out["worst"]  # nan
+
+
+def test_period_metrics_annualizes_by_bars_per_period():
+    import pandas as pd
+    from production.backtest.metrics_net import period_metrics
+    r = pd.Series([0.10, 0.10])           # 2 periods, 5 trading-days each -> 10 days
+    m = period_metrics(r, bars_per_period=5)
+    assert m["n_periods"] == 2
+    assert m["max_dd"] == pytest.approx(0.0)
+    assert m["net_cagr"] == pytest.approx(1.21 ** (252 / 10) - 1)
+    assert m["win"] == pytest.approx(1.0)
+
+
+def test_period_metrics_drawdown_and_calmar():
+    import pandas as pd
+    from production.backtest.metrics_net import period_metrics
+    r = pd.Series([0.2, -0.5, 0.1])       # eq 1.2, 0.6, 0.66 ; peak 1.2 -> dd -0.5
+    m = period_metrics(r, bars_per_period=1)
+    assert m["max_dd"] == pytest.approx(-0.5)
+    assert m["calmar"] == pytest.approx(m["net_cagr"] / 0.5)
+
+
+def test_period_metrics_empty_is_nan():
+    import pandas as pd
+    from production.backtest.metrics_net import period_metrics
+    m = period_metrics(pd.Series([], dtype=float))
+    assert m["n_periods"] == 0 and m["net_cagr"] != m["net_cagr"]

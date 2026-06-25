@@ -79,3 +79,21 @@ def tail_stats(net) -> dict:
         "worst": float(r.min()),
         "n": int(len(r)),
     }
+
+
+def period_metrics(returns, *, bars_per_period: int = 1, periods_per_year: int = 252) -> dict:
+    """Annualized metrics for a PER-PERIOD net-return Series (one return per rebalance
+    block of `bars_per_period` trading days). Distinct from net_metrics, which annualizes
+    a per-DAY ledger. Keys match the exec_backtest / research-runner callers."""
+    r = pd.Series(returns).dropna()
+    n = len(r)
+    if n == 0:
+        return {"net_cagr": float("nan"), "calmar": float("nan"),
+                "max_dd": float("nan"), "win": float("nan"), "n_periods": 0}
+    eq = (1 + r).cumprod()
+    last = float(eq.iloc[-1])
+    cagr = (last ** (periods_per_year / (bars_per_period * n)) - 1) if last > 0 else float("nan")
+    dd = float((eq / eq.cummax() - 1).min())
+    return {"net_cagr": cagr,
+            "calmar": (cagr / abs(dd)) if abs(dd) > 1e-12 else float("nan"),
+            "max_dd": dd, "win": float((r > 0).mean()), "n_periods": n}
