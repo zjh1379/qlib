@@ -15,3 +15,20 @@ def test_conservative_is_lighter_than_aggressive():
     assert c.below_normal is True and a.below_normal is False
     assert c.affinity_cores is not None       # reserves cores for foreground
     assert a.affinity_cores is None            # all cores
+
+
+from app.core.resources import popen_env
+
+
+def test_popen_env_caps_blas_and_sets_profile():
+    env = popen_env(PROFILES["conservative"])
+    for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        assert env[k] == "4"
+    assert env["QLIB_RES_PROFILE"] == "conservative"
+    assert env["QLIB_RES_LGBM_THREADS"] == "6"
+
+
+def test_popen_env_aggressive_values():
+    env = popen_env(PROFILES["aggressive"])
+    assert env["OMP_NUM_THREADS"] == "8"
+    assert env["QLIB_RES_LGBM_THREADS"] == "16"
