@@ -7,28 +7,18 @@ Quantifies precisely what the user's 'buy within the first 30 min' costs vs the 
 Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_am30_entry \
   > logs/eval_am30_entry.log 2>&1
 """
-import sys as _sys, sysconfig as _sysconfig
-_P = _sysconfig.get_paths().get("purelib")
-if _P and _P not in _sys.path[:1]:
-    _sys.path.insert(0, _P)
-try:
-    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+from production.research._harness import bootstrap, OOF_FAC, OOF_2MODEL, champion_scores
+bootstrap()
 
 import json
 from pathlib import Path
 import pandas as pd
 
-OOF_FAC = "production/reports/oof_lgbmfac_2021_2026.pkl"
-OOF_2MODEL = "production/reports/oof_2model_2021_2026.pkl"
-
 
 def main() -> int:
     Path("logs").mkdir(exist_ok=True)
-    from production.score_utils import rebuild_2model
     from production.intraday.exec_backtest import simulate
-    scores = rebuild_2model(pd.read_pickle(OOF_FAC), pd.read_pickle(OOF_2MODEL))
+    scores = champion_scores()
     out = {}
     print(f"top-3, exit=next-open, period=5, 30bp/rt")
     print(f"{'rule':>10} {'net_cagr':>9} {'Calmar':>7} {'maxDD':>8} {'win':>6} "

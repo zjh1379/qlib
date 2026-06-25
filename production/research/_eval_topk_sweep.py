@@ -13,41 +13,19 @@ smaller positions), so cost_drag is reported — the NET answer includes it.
 
 Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_topk_sweep > logs/eval_topk_sweep.log 2>&1
 """
-import sys as _sys
-import sysconfig as _sysconfig
-_P = _sysconfig.get_paths().get("purelib")
-if _P and _P not in _sys.path[:1]:
-    _sys.path.insert(0, _P)
-try:
-    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+from production.research._harness import bootstrap, OOF_FAC, OOF_2MODEL, CONFIG, champion_scores, pct, num
+bootstrap()
 
 from pathlib import Path
 import json
 
 import numpy as np
 import pandas as pd
+from production.score_utils import calmar
 
-OOF_FAC = "production/reports/oof_lgbmfac_2021_2026.pkl"
-OOF_2MODEL = "production/reports/oof_2model_2021_2026.pkl"
-CONFIG = "production/configs/rolling_ensemble.yaml"
 PERIOD, PROFILE = 5, "small"
 CAPITALS = [10_000.0, 100_000.0]
 TOP_KS = [1, 2, 3, 5, 10, 15, 20, 30]
-
-
-def _calmar(m):
-    dd, c = m.get("max_drawdown"), m.get("net_cagr")
-    return (c / abs(dd)) if (dd and np.isfinite(dd) and abs(dd) > 1e-12) else float("nan")
-
-
-def _pct(x):
-    return "n/a" if x is None or not np.isfinite(x) else f"{x:+6.1%}"
-
-
-def _num(x, nd=2):
-    return "n/a" if x is None or not np.isfinite(x) else f"{x:.{nd}f}"
 
 
 def _daily(scores, fwd, k, capital):
@@ -75,12 +53,10 @@ def _paired_t(a, b):
 
 
 def main() -> int:
-    Path("logs").mkdir(exist_ok=True)
-    from production.score_utils import score_of as _score_of, rebuild_2model as _rebuild_2model
+    from production.score_utils import score_of as _score_of
     from production.backtest.metrics_net import net_metrics, tail_stats
-    fac = pd.read_pickle(OOF_FAC)
+    factor_2m = champion_scores()
     two = pd.read_pickle(OOF_2MODEL)
-    factor_2m = _rebuild_2model(fac, two)
     base_2m = _score_of(two)
 
     insts = sorted(set(factor_2m.index.get_level_values("instrument")) |
@@ -104,7 +80,7 @@ def main() -> int:
             fd = _daily(factor_2m, fwd, k, capital)
             bd = _daily(base_2m, fwd, k, capital)
             m = net_metrics(fd)
-            cal = _calmar(m)
+            cal = calmar(m)
             ts = tail_stats(fd["net"])
             yr = {}
             for y in years:
@@ -114,11 +90,11 @@ def main() -> int:
             t, p = _paired_t(fd["net"], bd["net"])
             cap_out[k] = {"metrics": m, "calmar": cal, "tail": ts, "per_year": yr,
                           "neg_years": neg, "t": t, "p": p}
-            print(f"{k:>5} {_pct(m['net_cagr']):>9} {_num(m['net_ir']):>7} "
-                  f"{_pct(m['max_drawdown']):>8} {_num(cal):>7} {_num(m['avg_turnover'],3):>7} "
-                  f"{_pct(m['cost_drag_annual']):>8} {_pct(m['win_rate']):>6} "
-                  f"{_pct(ts['ret_p10']):>8} {_num(ts['ret_std'],4):>7} "
-                  f"{_pct(ts['neg_period_pct']):>6} {neg:>6} {_num(t):>6} {_num(p,4):>7}")
+            print(f"{k:>5} {pct(m['net_cagr']):>9} {num(m['net_ir']):>7} "
+                  f"{pct(m['max_drawdown']):>8} {num(cal):>7} {num(m['avg_turnover'],3):>7} "
+                  f"{pct(m['cost_drag_annual']):>8} {pct(m['win_rate']):>6} "
+                  f"{pct(ts['ret_p10']):>8} {num(ts['ret_std'],4):>7} "
+                  f"{pct(ts['neg_period_pct']):>6} {neg:>6} {num(t):>6} {num(p,4):>7}")
         out[f"capital_{int(capital)}"] = cap_out
 
     Path("logs/eval_topk_sweep_summary.json").write_text(

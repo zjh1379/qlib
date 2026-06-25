@@ -6,35 +6,24 @@ buyable-vs-unbuyable realized-return split (does the live trader miss the winner
 Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_executability \
   > logs/eval_executability.log 2>&1
 """
-import sys as _sys, sysconfig as _sysconfig
-_P = _sysconfig.get_paths().get("purelib")
-if _P and _P not in _sys.path[:1]:
-    _sys.path.insert(0, _P)
-try:
-    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+from production.research._harness import bootstrap, OOF_FAC, OOF_2MODEL, CONFIG, champion_scores
+bootstrap()
 
 import json
 from pathlib import Path
 import pandas as pd
-
-OOF_FAC = "production/reports/oof_lgbmfac_2021_2026.pkl"
-OOF_2MODEL = "production/reports/oof_2model_2021_2026.pkl"
-CONFIG = "production/configs/rolling_ensemble.yaml"
 PERIOD, CAPITAL, PROFILE = 5, 10_000.0, "small"
 TOP_KS = [1, 2, 3, 5]
 
 
 def main() -> int:
     Path("logs").mkdir(exist_ok=True)
-    from production.score_utils import rebuild_2model
     from production.backtest.data import load_fwd_returns
     from production.backtest.executability import (
         load_entry_ohlc, buyable_mask, gate_scores, selection_bias_split)
     from production.backtest.run import build_report
 
-    scores = rebuild_2model(pd.read_pickle(OOF_FAC), pd.read_pickle(OOF_2MODEL))
+    scores = champion_scores()
     insts = sorted(scores.index.get_level_values("instrument").unique())
     dts = scores.index.get_level_values("datetime")
     start, end = str(dts.min().date()), str(dts.max().date())

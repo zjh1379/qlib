@@ -8,23 +8,13 @@ so open is best-case and the real entry is somewhat worse. Daily data only (fast
 Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_user_exec \
   > logs/eval_user_exec.log 2>&1
 """
-import sys as _sys, sysconfig as _sysconfig
-_P = _sysconfig.get_paths().get("purelib")
-if _P and _P not in _sys.path[:1]:
-    _sys.path.insert(0, _P)
-try:
-    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+from production.research._harness import bootstrap, OOF_FAC, OOF_2MODEL, CONFIG, champion_scores
+bootstrap()
 
 import json
 from pathlib import Path
 import numpy as np
 import pandas as pd
-
-OOF_FAC = "production/reports/oof_lgbmfac_2021_2026.pkl"
-OOF_2MODEL = "production/reports/oof_2model_2021_2026.pkl"
-CONFIG = "production/configs/rolling_ensemble.yaml"
 TOP_K = 3
 HOLDS = [2, 3, 4, 5]
 COST_BPS = 30.0  # round-trip per trade, approx small-capital (万2.5x2 + 印花 + 滑点)
@@ -49,9 +39,8 @@ def _metrics(per_period: pd.Series, hold: int) -> dict:
 
 def main() -> int:
     Path("logs").mkdir(exist_ok=True)
-    from production.score_utils import rebuild_2model
     from production.intraday.exec_backtest import enumerate_trades
-    scores = rebuild_2model(pd.read_pickle(OOF_FAC), pd.read_pickle(OOF_2MODEL))
+    scores = champion_scores()
     insts = sorted(scores.index.get_level_values("instrument").unique())
     dts = scores.index.get_level_values("datetime")
     start, end = str(dts.min().date()), str(dts.max().date())

@@ -9,20 +9,12 @@ included as a fallback (index = price-only, ~2-3%/yr below a total-return ETF).
 Run: F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_etf_real \
   > logs/eval_etf_real.log 2>&1
 """
-import sys as _sys, sysconfig as _sysconfig
-_P = _sysconfig.get_paths().get("purelib")
-if _P and _P not in _sys.path[:1]:
-    _sys.path.insert(0, _P)
-try:
-    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+from production.research._harness import bootstrap, OOF_2MODEL
+bootstrap()
 
 import json
 from pathlib import Path
 import pandas as pd
-
-OOF_2MODEL = "production/reports/oof_2model_2021_2026.pkl"
 CAPITAL = 10_000.0
 MA_WINDOW, BAND = 60, 0.10
 # broad beta the user could actually buy at ¥10k (ETF) + underlying index fallback
