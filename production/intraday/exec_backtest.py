@@ -91,19 +91,16 @@ def simulate(scores, *, rule, top_k=5, period=5, k=0.01, g=0.03,
     periods = sorted(per_rebalance)
     idx = pd.DatetimeIndex([step_date[p] for p in periods])
     pr = pd.Series([float(np.mean(per_rebalance[p])) for p in periods], index=idx)
-    eq = (1 + pr).cumprod()
-    n = len(pr)
-    ann = (eq.iloc[-1] ** (252 / (period * n)) - 1) if n and eq.iloc[-1] > 0 else float("nan")
-    dd = float((eq / eq.cummax() - 1).min()) if n else float("nan")
+    from production.backtest.metrics_net import period_metrics
+    pm = period_metrics(pr, bars_per_period=period)
     by_year = {}
     for y in sorted({d.year for d in pr.index}):
         py = pr[pr.index.year == y]
         by_year[int(y)] = float((1 + py).prod() - 1) if len(py) else float("nan")
     n_trades = len(trades)
-    return {"rule": rule, "net_cagr": ann,
-            "calmar": (ann / abs(dd)) if dd else float("nan"),
-            "max_dd": dd, "win": float((pr > 0).mean()) if n else float("nan"),
-            "n_periods": n, "n_trades": n_trades, "n_filled": n_filled,
+    return {"rule": rule, "net_cagr": pm["net_cagr"],
+            "calmar": pm["calmar"], "max_dd": pm["max_dd"], "win": pm["win"],
+            "n_periods": pm["n_periods"], "n_trades": n_trades, "n_filled": n_filled,
             "n_unfillable": n_unfillable, "n_gap_skip": n_gap_skip,
             "n_no_open": n_no_open, "n_fallback": n_fallback, "n_glitch": n_glitch,
             "unfillable_pct": (n_unfillable / n_trades) if n_trades else 0.0,

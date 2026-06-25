@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from production.backtest.metrics_net import period_metrics
 TOP_K = 3
 HOLDS = [2, 3, 4, 5]
 COST_BPS = 30.0  # round-trip per trade, approx small-capital (万2.5x2 + 印花 + 滑点)
@@ -25,16 +26,6 @@ def _daily_oc(insts, start, end) -> pd.DataFrame:
     position (QlibDataLoader returns MultiIndex/expr-named cols)."""
     from production.qlib_features import load_features
     return load_features(insts, start, end, ["$open", "$close"], ["open", "close"], config_path=CONFIG)
-
-
-def _metrics(per_period: pd.Series, hold: int) -> dict:
-    eq = (1 + per_period).cumprod()
-    n = len(per_period)
-    ann = (eq.iloc[-1] ** (252 / (hold * n)) - 1) if n and eq.iloc[-1] > 0 else float("nan")
-    dd = float((eq / eq.cummax() - 1).min()) if n else float("nan")
-    return {"net_cagr": ann, "calmar": (ann / abs(dd)) if dd and abs(dd) > 1e-9 else float("nan"),
-            "max_dd": dd, "win": float((per_period > 0).mean()) if n else float("nan"),
-            "n_periods": n}
 
 
 def main() -> int:
@@ -62,7 +53,7 @@ def main() -> int:
                     continue
                 per.setdefault(t["decision_date"], []).append(float(xo) / float(eo) - 1 - COST_BPS / 1e4)
             ser = pd.Series({d: float(np.mean(v)) for d, v in per.items()}).sort_index()
-            m = _metrics(ser, hold)
+            m = period_metrics(ser, bars_per_period=hold)
             out[f"hold{hold}_{exit_field}"] = m
             print(f"{hold:>4} {exit_field:>6} {m['net_cagr']:>+9.2%} {m['max_dd']:>+8.2%} "
                   f"{m['calmar']:>7.2f} {m['win']:>6.1%} {m['n_periods']:>5}")
