@@ -29,3 +29,12 @@ def test_pro_profile_has_no_min_and_lower_bps():
     assert cm.commission_bps == 1.0
     # buy 1000: commission=1000*1/1e4=0.1 (no min); transfer=0.01; slip=0.5
     assert cm.trade_cost(1000.0, is_buy=True) == pytest.approx(0.1 + 0.01 + 0.5, rel=1e-9)
+
+
+def test_etf_profile_no_stamp_no_transfer():
+    cm = cost_model("etf")
+    assert cm.stamp_bps == 0.0
+    assert cm.transfer_bps == 0.0
+    assert cm.commission_min_yuan == 5.0
+    # sell 10000 ETF: commission=max(10000*2.5/1e4=2.5, 5)=5; stamp=0; transfer=0; slip=5 => 10
+    assert cm.trade_cost(10000.0, is_buy=False) == pytest.approx(5 + 0 + 0 + 5, rel=1e-9)

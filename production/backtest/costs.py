@@ -30,6 +30,8 @@ PROFILES: dict[str, dict] = {
                   stamp_bps=5.0, transfer_bps=0.1, slippage_bps=5.0),
     "pro": dict(commission_bps=1.0, commission_min_yuan=0.0,
                 stamp_bps=5.0, transfer_bps=0.1, slippage_bps=5.0),
+    "etf": dict(commission_bps=2.5, commission_min_yuan=5.0,
+                stamp_bps=0.0, transfer_bps=0.0, slippage_bps=5.0),
 }
 
 
