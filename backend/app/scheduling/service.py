@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Awaitable, Callable
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -12,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.resources import PROFILES, apply_post_spawn, popen_creationflags, popen_env
 from app.scheduling.orm import RetrainScheduleORM
 from app.scheduling.schemas import RetrainScheduleRead, RetrainScheduleUpdate
 
@@ -53,7 +55,7 @@ class AlreadyRunning(Exception):
     pass
 
 
-JobCallable = Callable[[str, Path], Awaitable[None]]
+JobCallable = Callable[..., Awaitable[None]]
 
 
 def make_subprocess_retrain_job(python_path: str, repo_root: Path) -> JobCallable:
@@ -64,9 +66,10 @@ def make_subprocess_retrain_job(python_path: str, repo_root: Path) -> JobCallabl
     the training layer for structured PROGRESS lines.
     """
 
-    async def _job(job_id: str, log_path: Path) -> None:
+    async def _job(job_id: str, log_path: Path, profile_name: str = "conservative") -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        _log.info("retrain_subprocess_starting", job_id=job_id, python=python_path, cwd=str(repo_root))
+        prof = PROFILES.get(profile_name, PROFILES["conservative"])
+        _log.info("retrain_subprocess_starting", job_id=job_id, python=python_path, cwd=str(repo_root), profile=profile_name)
         proc = await asyncio.create_subprocess_exec(
             python_path,
             "-m",
@@ -75,7 +78,10 @@ def make_subprocess_retrain_job(python_path: str, repo_root: Path) -> JobCallabl
             cwd=str(repo_root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env={**os.environ, **popen_env(prof)},
+            creationflags=popen_creationflags(prof),
         )
+        apply_post_spawn(proc.pid, prof)
         if proc.stdout is None:
             _log.error("retrain_subprocess_no_stdout", job_id=job_id)
             await proc.wait()
@@ -316,7 +322,9 @@ class SchedulerManager:
                     entry["status"] = "running"
                     entry["started_at"] = datetime.now(tz=_CST).isoformat()
                 try:
-                    await self._raw_job_fn(_tracked_job_id, self._log_path_for(_tracked_job_id))
+                    kind = (entry or {}).get("kind", "manual")
+                    profile_name = "aggressive" if kind == "cron" else "conservative"
+                    await self._raw_job_fn(_tracked_job_id, self._log_path_for(_tracked_job_id), profile_name)
                     if entry is not None:
                         entry["status"] = "done"
                 except Exception as exc:
