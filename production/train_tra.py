@@ -190,6 +190,11 @@ def train_tra_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Seri
     """
     from qlib.contrib.data.dataset import MTSDatasetH
     from qlib.contrib.model.pytorch_tra import TRAModel
+    from production.gpu_guard import effective_gpu
+    import qlib.contrib.model.pytorch_tra as _tra_mod
+    if effective_gpu(0) < 0:
+        _tra_mod.device = "cpu"
+    print(f"PROGRESS-DEVICE tra device={_tra_mod.device}", flush=True)
     from qlib.workflow import R
 
     # Patch qlib's TRAModel.test_epoch so mid-week training (NaN test labels

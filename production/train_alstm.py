@@ -137,6 +137,10 @@ def train_alstm_multihead(cfg, universe_name: str, end_date: date) -> list[pd.Se
     # `pytorch_alstm.ALSTM` doesn't accept `n_jobs` (only `pytorch_alstm_ts`
     # does). Strip it from kwargs in case the YAML still carries it.
     model_kwargs = {k: v for k, v in alstm_yaml["model"]["kwargs"].items() if k != "n_jobs"}
+    from production.gpu_guard import effective_gpu
+    _req = int(model_kwargs.get("GPU", 0))
+    model_kwargs["GPU"] = effective_gpu(_req)   # -1 (CPU) if VRAM too low (e.g. LM Studio)
+    print(f"PROGRESS-DEVICE alstm requested_gpu={_req} effective_gpu={model_kwargs['GPU']}", flush=True)
     for h in cfg.horizons:
         # Build a fresh handler for this horizon only; we free it at the end
         # of the iteration so the next horizon's Alpha360 frame is not
