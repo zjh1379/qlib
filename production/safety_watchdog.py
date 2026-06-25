@@ -57,7 +57,16 @@ KILLABLE_TOKENS = (
     "production.daily_inference",
     "production.incremental_refresh",
     "production.backfill_calibration",
+    "production.train_alstm",
+    "production.train_tra",
+    "production.walk_forward",
 )
+
+
+def is_killable_cmd(cmd: str) -> bool:
+    """True iff the command line matches a training process we are allowed to
+    kill. Infra (uvicorn/vite/chrome/claude/explorer) never matches."""
+    return any(tok in cmd for tok in KILLABLE_TOKENS)
 
 
 def _commit_pct() -> tuple[float, float, float]:
@@ -105,7 +114,7 @@ def _find_heaviest_killable() -> Optional[psutil.Process]:
             if p.info.get("name") != "python.exe":
                 continue
             cmd = " ".join(p.info.get("cmdline") or [])
-            if not any(tok in cmd for tok in KILLABLE_TOKENS):
+            if not is_killable_cmd(cmd):
                 continue
             rss = p.info["memory_info"].rss
             if rss > best_rss:
