@@ -30,13 +30,6 @@ def load_market_proxy(instruments, start: str, end: str,
                       config_path: str = "production/configs/rolling_ensemble.yaml") -> pd.Series:
     """Load trailing 1d returns for `instruments`, equal-weight mean per day,
     cumulate to a synthetic market close Series indexed by datetime."""
-    from qlib.data.dataset.loader import QlibDataLoader
-    from .data import init_qlib_from_config
-    init_qlib_from_config(config_path)
-    loader = QlibDataLoader(config={"feature": ([MKT_RET_EXPR], ["mkt_ret"])})
-    df = loader.load(instruments=instruments, start_time=start, end_time=end)
-    s = df.iloc[:, 0] if isinstance(df, pd.DataFrame) else df
-    if s.index.names[0] == "instrument":
-        s = s.swaplevel().sort_index()
-    s.index = s.index.set_names(["datetime", "instrument"])
+    from production.qlib_features import load_series
+    s = load_series(instruments, start, end, MKT_RET_EXPR, "mkt_ret", config_path=config_path)
     return returns_to_close(mean_market_return(s.dropna()))

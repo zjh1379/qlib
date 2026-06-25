@@ -37,16 +37,8 @@ def enumerate_trades(scores: pd.Series, top_k: int = 5, period: int = 5) -> list
 def daily_open_adj(instruments, start, end,
                    config="production/configs/rolling_ensemble.yaml") -> pd.Series:
     """Adjusted daily $open per (datetime,instrument) via qlib (engine-consistent)."""
-    from qlib.data.dataset.loader import QlibDataLoader
-    from production.backtest.data import init_qlib_from_config
-    init_qlib_from_config(config)
-    px = QlibDataLoader(config={"feature": (["$open"], ["open"])}).load(
-        instruments=instruments, start_time=start, end_time=end)
-    s = px.iloc[:, 0] if isinstance(px, pd.DataFrame) else px
-    if s.index.names[0] == "instrument":
-        s = s.swaplevel().sort_index()
-    s.index = s.index.set_names(["datetime", "instrument"])
-    return s.sort_index()
+    from production.qlib_features import load_series
+    return load_series(instruments, start, end, "$open", "open", config_path=config)
 
 
 def simulate(scores, *, rule, top_k=5, period=5, k=0.01, g=0.03,

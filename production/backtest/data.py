@@ -31,12 +31,6 @@ def load_fwd_returns(instruments, start: str, end: str,
                      config_path: str = "production/configs/rolling_ensemble.yaml") -> pd.Series:
     """Returns Series (datetime,instrument)->fwd_ret_1d for the given instruments/date range.
     `instruments` may be a list of qlib codes (e.g. ['SH600000']) or a market string."""
-    from qlib.data.dataset.loader import QlibDataLoader
-    init_qlib_from_config(config_path)
-    loader = QlibDataLoader(config={"feature": ([FWD_RET_EXPR], ["fwd_ret_1d"])})
-    df = loader.load(instruments=instruments, start_time=start, end_time=end)
-    s = df.iloc[:, 0] if isinstance(df, pd.DataFrame) else df
-    if s.index.names[0] == "instrument":
-        s = s.swaplevel().sort_index()
-    s.index = s.index.set_names(["datetime", "instrument"])
-    return s.rename("fwd_ret_1d").dropna()
+    from production.qlib_features import load_series
+    return load_series(instruments, start, end, FWD_RET_EXPR, "fwd_ret_1d",
+                       config_path=config_path, dropna=True)

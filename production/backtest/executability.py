@@ -87,18 +87,8 @@ def load_entry_ohlc(instruments, start: str, end: str,
     (涨停 base). Aligned to d like load_fwd_returns (entry at d+1):
       entry_open=Ref($open,-1), entry_high=Ref($high,-1), entry_low=Ref($low,-1),
       prev_close=$close. Integration helper (qlib); not unit-tested."""
-    from qlib.data.dataset.loader import QlibDataLoader
-    from production.backtest.data import init_qlib_from_config
-    init_qlib_from_config(config_path)
+    from production.qlib_features import load_features
     fields = ["Ref($open,-1)", "Ref($high,-1)", "Ref($low,-1)", "$close"]
     names = ["entry_open", "entry_high", "entry_low", "prev_close"]
-    df = QlibDataLoader(config={"feature": (fields, names)}).load(
-        instruments=instruments, start_time=start, end_time=end)
-    # QlibDataLoader returns MultiIndex/expression-named columns (it does not honor the
-    # `names` as flat labels), so force our names by position — same spirit as
-    # load_fwd_returns' positional df.iloc[:, 0]. Order matches the `fields` list.
-    df.columns = names
-    if df.index.names[0] == "instrument":
-        df = df.swaplevel().sort_index()
-    df.index = df.index.set_names(["datetime", "instrument"])
-    return df.dropna(subset=["entry_open", "prev_close"])
+    return load_features(instruments, start, end, fields, names,
+                         config_path=config_path, dropna_subset=["entry_open", "prev_close"])

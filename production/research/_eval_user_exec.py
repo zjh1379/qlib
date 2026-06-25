@@ -33,16 +33,8 @@ COST_BPS = 30.0  # round-trip per trade, approx small-capital (万2.5x2 + 印花
 def _daily_oc(insts, start, end) -> pd.DataFrame:
     """Adjusted daily open+close per (datetime,instrument). Force column names by
     position (QlibDataLoader returns MultiIndex/expr-named cols)."""
-    from qlib.data.dataset.loader import QlibDataLoader
-    from production.backtest.data import init_qlib_from_config
-    init_qlib_from_config(CONFIG)
-    df = QlibDataLoader(config={"feature": (["$open", "$close"], ["open", "close"])}).load(
-        instruments=insts, start_time=start, end_time=end)
-    if df.index.names[0] == "instrument":
-        df = df.swaplevel().sort_index()
-    df.index = df.index.set_names(["datetime", "instrument"])
-    df.columns = ["open", "close"]
-    return df.sort_index()
+    from production.qlib_features import load_features
+    return load_features(insts, start, end, ["$open", "$close"], ["open", "close"], config_path=CONFIG)
 
 
 def _metrics(per_period: pd.Series, hold: int) -> dict:
