@@ -85,12 +85,46 @@ top_k {1,2,3} × {plain, P3 overlay} × {ungated, 涨停-gated}:
 - 剩余 +5pp 上行在"接住涨停赢家"(gated +17% vs ungated +22%)→ 开盘限价/预埋涨停买单 + 日内部分成交建模(下一步**可选**,需 5min 数据,收益不确定)。
 - **下一步真正的验证是前向纸面交易(真 OOS),不是再回测。** 建议从现在起按 top-3 每日落盘 picks + 隔日对账(复用 `_reconcile_live.py` 的 `decompose_trade`)攒真实样本。
 
-## 复现
+## A2c — 用户真实执行建模(进场/出场,2026-06-25)
+用户实际打法 = **开盘后 30 分钟内买入 + 过几天下午卖出**。两块分别在 top-3 / 全 OOF 上建模。
+
+### 进场:first-30min vs 开盘(`_eval_am30_entry`;exit=次日开盘,period=5,30bp/rt,复用 P1 缓存 5min)
+| 进场 | net_cagr | Calmar | maxDD |
+|--|--|--|--|
+| **开盘价** | **+22.1%** | 0.41 | −53.6% |
+| am30_vwap(前 30min VWAP) | **−1.85%** | −0.04 | −51.2% |
+
+**前 30 分钟买入比开盘买入跑输 24pp,直接把 edge 打没。** 票从开盘就猛弹,前 30 分钟是最贵的追入窗口(比 P1 top-5 半日均价 −16pp 更狠)。**→ 买在开盘是最大单一杠杆(+24pp)。** 成交 790/801(涨停 1.4%、回退 0.9%,不影响结论)。
+
+### 出场:下午收盘 vs 次日开盘 × 持有期(`_eval_user_exec`;entry=开盘,30bp/rt)
+| hold | 下午 close(用户) | 次日 open(基线) |
+|--|--|--|
+| 2 | −10.3% | −9.2% |
+| 3 | **+21.8% / Cal 0.34** | +12.2% |
+| 4 | +20.8% / Cal 0.32 | +1.6% |
+| 5 | +10.7% | **+22.1% / Cal 0.41** |
+
+- **持 3-4 天 + 下午收盘卖 = 好**(close 比 next-open +~9pp);**持 5 天改开盘卖**;**别持 2 天**(负)。用户"下午、几天后"出场直觉在 3-4 天是对的。
+
+### 执行 playbook(¥10k)
+1. **买在开盘价,绝不等 30 分钟**(+24pp,最大杠杆)。
+2. **持 3-4 天,下午收盘附近卖**。
+3. **top-3**(非 top-1,避 −90% ruin)。
+4. 不碰 ETF、不追涨停。
+
+合起来:旧打法(30min 进 + 几天后出)≈ 白干/小亏(进场漏 24pp);**仅把进场移到开盘 → ~+20% / −55%DD**。与用户实盘亏损体感一致 —— **问题在进场时点,不在模型**。
+
+**口径注:** 绝对值用 per-trade 30bp(比引擎 ¥10k 含最低佣金偏乐观);**相对信号(进场 −24pp、出场 close-vs-open、hold 扫描)才是稳健结论**。
+
+## 复现(全部从 main 跑;需 OOF + qlib 数据;进场研究需 P1 的 5min 缓存)
 ```
-# 已跑(worktree,需先拷 OOF 进 production/reports/):
-F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_topk_sweep
-F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_executability
-F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_etf_timing
-F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._reconcile_live --trades production/reports/live_trades.csv
+F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_topk_sweep      # B1 操作点
+F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_executability    # B2 涨停/偏差
+F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_etf_timing        # B4 ETF(合成)
+F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_etf_real          # A2a 真实 ETF
+F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_deploy            # A2b 可部署矩阵
+F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_user_exec         # A2c 出场/持有
+F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research._eval_am30_entry        # A2c 进场penalty
+F:/Tools/Anaconda/envs/qlib/python.exe -X utf8 -m production.research.forward_journal snapshot --top-k 3   # 前向日志
 ```
-产物:`logs/eval_topk_sweep_summary.json`、`logs/eval_executability.json`、`logs/eval_etf_timing.json`、`logs/reconcile_live.json`。
+产物:`logs/eval_*.json` + `production/reports/forward_journal.csv`(均 gitignore)。
