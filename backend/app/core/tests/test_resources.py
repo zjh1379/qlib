@@ -48,3 +48,33 @@ def test_creationflags_below_normal_on_windows():
 
 def test_creationflags_zero_for_aggressive():
     assert popen_creationflags(PROFILES["aggressive"]) == 0
+
+
+from unittest.mock import MagicMock, patch
+from app.core.resources import apply_post_spawn
+
+
+def test_apply_post_spawn_sets_affinity_for_conservative():
+    fake_proc = MagicMock()
+    with patch("app.core.resources.psutil") as ps:
+        ps.Process.return_value = fake_proc
+        ps.cpu_count.return_value = 24
+        apply_post_spawn(1234, PROFILES["conservative"])
+        fake_proc.cpu_affinity.assert_called_once()
+        bound = fake_proc.cpu_affinity.call_args[0][0]
+        assert len(bound) == 12
+
+
+def test_apply_post_spawn_aggressive_skips_affinity():
+    fake_proc = MagicMock()
+    with patch("app.core.resources.psutil") as ps:
+        ps.Process.return_value = fake_proc
+        ps.cpu_count.return_value = 24
+        apply_post_spawn(1234, PROFILES["aggressive"])
+        fake_proc.cpu_affinity.assert_not_called()
+
+
+def test_apply_post_spawn_swallows_errors():
+    with patch("app.core.resources.psutil") as ps:
+        ps.Process.side_effect = RuntimeError("gone")
+        apply_post_spawn(999999, PROFILES["conservative"])  # must not raise
