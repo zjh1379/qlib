@@ -32,3 +32,19 @@ def test_popen_env_aggressive_values():
     env = popen_env(PROFILES["aggressive"])
     assert env["OMP_NUM_THREADS"] == "8"
     assert env["QLIB_RES_LGBM_THREADS"] == "16"
+
+
+import sys as _sys
+from app.core.resources import popen_creationflags
+
+
+def test_creationflags_below_normal_on_windows():
+    flags = popen_creationflags(PROFILES["conservative"])
+    if _sys.platform.startswith("win"):
+        assert flags == 0x00004000  # BELOW_NORMAL_PRIORITY_CLASS
+    else:
+        assert flags == 0
+
+
+def test_creationflags_zero_for_aggressive():
+    assert popen_creationflags(PROFILES["aggressive"]) == 0
