@@ -70,6 +70,30 @@ def _commit_pct() -> tuple[float, float, float]:
     return pct, used / 2**30, total / 2**30
 
 
+def decide_action(
+    pct: float,
+    used_gb: float,
+    total_gb: float,
+    *,
+    warn_pct: float,
+    kill_pct: float,
+    floor_gb: float,
+) -> str:
+    """Pure decision: 'kill' | 'warn' | 'ok'.
+
+    Kills when commit pct crosses kill_pct OR when *absolute* free commit
+    (total - used) drops below floor_gb. The floor matters because on a small
+    commit ceiling a percentage threshold reacts too late — by the time pct is
+    high the few remaining GB vanish within one poll interval.
+    """
+    free_gb = total_gb - used_gb
+    if pct >= kill_pct or free_gb < floor_gb:
+        return "kill"
+    if pct >= warn_pct:
+        return "warn"
+    return "ok"
+
+
 def _find_heaviest_killable() -> Optional[psutil.Process]:
     """Walk all processes, return the heaviest one whose cmdline matches
     KILLABLE_TOKENS. Returns None if no killable training process found.
@@ -153,12 +177,17 @@ def main() -> int:
         try:
             pct, used_gb, total_gb = _commit_pct()
             now = time.time()
-            if pct >= args.kill_pct:
+            action = decide_action(
+                pct, used_gb, total_gb,
+                warn_pct=args.warn_pct, kill_pct=args.kill_pct,
+                floor_gb=getattr(args, "floor_gb", 4.0),
+            )
+            if action == "kill":
                 target = _find_heaviest_killable()
                 if target:
                     _kill_with_grace(
                         target,
-                        reason=f"system commit {pct:.1f}% > kill threshold {args.kill_pct}%",
+                        reason=f"commit {pct:.1f}% / free {total_gb-used_gb:.1f}GB crossed limits",
                     )
                     consecutive_kill_attempts += 1
                     if consecutive_kill_attempts > 3:
@@ -167,19 +196,12 @@ def main() -> int:
                         consecutive_kill_attempts = 0
                 else:
                     if now - last_warn_at > 30:
-                        log.warning(
-                            "commit %.1f%% CRITICAL but no killable training proc — "
-                            "consider closing browser tabs or rebooting",
-                            pct,
-                        )
+                        log.warning("commit %.1f%% CRITICAL but no killable training proc", pct)
                         last_warn_at = now
-            elif pct >= args.warn_pct:
+            elif action == "warn":
                 consecutive_kill_attempts = 0
                 if now - last_warn_at > 30:
-                    log.warning(
-                        "commit %.1f%% (%.1f / %.1f GB) approaching limit",
-                        pct, used_gb, total_gb,
-                    )
+                    log.warning("commit %.1f%% (%.1f / %.1f GB) approaching limit", pct, used_gb, total_gb)
                     last_warn_at = now
             else:
                 consecutive_kill_attempts = 0
