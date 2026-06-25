@@ -285,6 +285,16 @@ def train_lgbm_horizon(
     )
 
     _lgbm_kwargs = dict(lgbm_yaml["model"]["kwargs"])
+    # Resource-budget override: parent injects QLIB_RES_LGBM_THREADS per profile
+    # (conservative=6 / aggressive=16). Falls back to the yaml value when unset
+    # (command-line / tests unaffected).
+    import os as _os
+    _lt = _os.environ.get("QLIB_RES_LGBM_THREADS")
+    if _lt:
+        try:
+            _lgbm_kwargs["num_threads"] = int(_lt)
+        except ValueError:
+            pass
     if objective == "lambdarank":
         from production.lgbm_rank import LGBRankModel
         model = LGBRankModel(**_lgbm_kwargs)  # ignores `loss`, fixes objective=lambdarank
