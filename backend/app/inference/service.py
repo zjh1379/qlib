@@ -9,6 +9,7 @@ doesn't bloat the FastAPI process.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -17,6 +18,7 @@ from collections import OrderedDict
 from datetime import date, datetime
 from pathlib import Path
 
+from app.core.resources import PROFILES, apply_post_spawn, popen_creationflags, popen_env
 from app.inference.schemas import InferenceJob, InferenceStatus, TriggerResponse
 
 log = logging.getLogger(__name__)
@@ -127,11 +129,15 @@ def _run_subprocess(job_id: str, end_date: date | None, force: bool, reason: str
     rc: int | None = None
     err_tail: str = ""
     try:
+        profile = PROFILES["conservative"]  # manual/UI inference keeps desktop responsive
         with log_path.open("wb") as logf:
             proc = subprocess.Popen(
                 cmd, cwd=str(REPO_ROOT),
                 stdout=logf, stderr=subprocess.STDOUT,
+                env={**os.environ, **popen_env(profile)},
+                creationflags=popen_creationflags(profile),
             )
+            apply_post_spawn(proc.pid, profile)
             try:
                 rc = proc.wait(timeout=SUBPROCESS_TIMEOUT_SECONDS)
             except subprocess.TimeoutExpired:
