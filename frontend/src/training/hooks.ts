@@ -5,7 +5,7 @@ import { api } from '@/api/client';
 export function useStartTraining() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (force: boolean) => api.training.run(force),
+    mutationFn: (body: { scope: 'full' | 'single'; models?: string[]; force?: boolean }) => api.training.run(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['training', 'active'] }),
   });
 }
@@ -29,5 +29,36 @@ export function useTrainingJobDetail(jobId: string | null) {
     enabled: !!jobId,
     refetchInterval: (q) => (q.state.data?.status === 'running' ? 3_000 : false),
     refetchIntervalInBackground: true,
+  });
+}
+
+export function useTrainingRuns() {
+  return useQuery({
+    queryKey: ['training', 'runs'],
+    queryFn: () => api.training.runs(),
+    staleTime: 10_000,
+  });
+}
+
+export function useRollback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (target: 'previous_1' | 'previous_2') => api.models.rollback(target),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['training', 'runs'] });
+      qc.invalidateQueries({ queryKey: ['evaluation', 'recorders'] });
+    },
+  });
+}
+
+export function usePromote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { recorder_id: string; candidate_experiment: string }) =>
+      api.training.promote(args.recorder_id, args.candidate_experiment),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['training', 'runs'] });
+      qc.invalidateQueries({ queryKey: ['evaluation', 'recorders'] });
+    },
   });
 }

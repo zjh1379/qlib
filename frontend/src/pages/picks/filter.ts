@@ -1,5 +1,6 @@
 import type { components } from '@/api/types.gen';
 import type { Board, FilterParams } from './types';
+import { daysInTop, windowScoreAvg } from './persistence';
 
 type Candidate = components['schemas']['ScreenItem'];
 
@@ -51,4 +52,29 @@ function passesRange(value: number | null | undefined, lo: number | null, hi: nu
   if (lo !== null && value < lo) return false;
   if (hi !== null && value > hi) return false;
   return true;
+}
+
+/** Full client-side pipeline producing the displayed rows:
+ *  1) attribute filters (price/trend/board/ST/consensus) via applyFilters
+ *  2) window score_avg recompute (over last D days)
+ *  3) persistence filter: days in top-`top` over last D days >= min_top
+ *  4) canonical rank by window score_avg desc
+ *  5) display cap to `top` rows
+ *  Returns the selected, rank-assigned rows (display sort applied by caller). */
+export function selectCandidates(
+  candidates: Candidate[],
+  filters: FilterParams,
+  windowDatesLen: number,
+): Candidate[] {
+  const D = Math.max(1, Math.min(filters.days, windowDatesLen || filters.days));
+  const passed = applyFilters(candidates, filters)
+    .map((c) => ({
+      ...c,
+      score_avg: windowScoreAvg(c.daily_scores ?? [], D) ?? c.score_avg,
+    }))
+    .filter((c) => daysInTop(c.daily_ranks ?? [], D, filters.top) >= filters.min_top);
+  passed.sort((a, b) => (b.score_avg ?? -Infinity) - (a.score_avg ?? -Infinity));
+  return passed
+    .map((c, i) => ({ ...c, rank: i + 1 }))
+    .slice(0, filters.top);
 }

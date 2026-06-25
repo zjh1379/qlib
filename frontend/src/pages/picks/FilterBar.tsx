@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { cn } from '@/lib/utils';
 import type { Board, FilterParams, NewHighN, PctChangeN, View } from './types';
-import { BOARDS, NEW_HIGH_N_OPTIONS, PCT_CHANGE_N_OPTIONS } from './types';
+import { BOARDS, NEW_HIGH_N_OPTIONS, PCT_CHANGE_N_OPTIONS, WINDOW_K } from './types';
 
 interface FilterBarProps {
   params: FilterParams;
@@ -8,13 +9,16 @@ interface FilterBarProps {
   candidateCount: number | null;
   onChange: (patch: Partial<FilterParams>) => void;
   onReset: () => void;
-  /** Base model+horizon names available in the active recorder (e.g.
-   *  ['lgbm_1d', 'lgbm_5d', ..., 'tra_20d']). When empty, model selector
-   *  is hidden (fresh page load before first response). */
   availableModels?: string[];
-  /** Subset actually used as score by the current response. `null` means
-   *  the recorder's pool-time default (e.g. v9 = 1d+5d cols). */
   activeModels?: string[] | null;
+  // --- recompute draft tier ---
+  draftView: View;
+  draftModels: string[];
+  onDraftView: (v: View) => void;
+  onDraftModels: (m: string[]) => void;
+  recomputeDirty: boolean;
+  onRecompute: () => void;
+  recomputeBusy: boolean;
 }
 
 const VIEW_OPTIONS: { value: View; label: string }[] = [
@@ -27,6 +31,8 @@ const VIEW_OPTIONS: { value: View; label: string }[] = [
 export function FilterBar({
   params, resultCount, candidateCount, onChange, onReset,
   availableModels = [], activeModels = null,
+  draftView, draftModels, onDraftView, onDraftModels,
+  recomputeDirty, onRecompute, recomputeBusy,
 }: FilterBarProps) {
   return (
     <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-5 space-y-5">
@@ -46,26 +52,38 @@ export function FilterBar({
         </div>
       </div>
 
-      {/* Group 1: 基础 (immediate update) */}
+      {/* Group 1: 基础即时层 */}
       <div>
-        <h3 className="text-[10px] text-[#6e7681] uppercase tracking-wider mb-2">基础</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Select label="视图" value={params.view} options={VIEW_OPTIONS} onChange={(v) => onChange({ view: v as View })} />
+        <h3 className="text-[10px] text-[#6e7681] uppercase tracking-wider mb-2">基础（即时）</h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <NumberField label="Top N" value={params.top} min={1} max={300} onChange={(v) => onChange({ top: v })} />
-          <NumberField label="窗口天数" value={params.days} min={1} max={60} onChange={(v) => onChange({ days: v })} />
+          <NumberField label="窗口天数" value={params.days} min={1} max={WINDOW_K} onChange={(v) => onChange({ days: v })} />
           <NumberField label="最少进 top N 天数" value={params.min_top} min={0} max={params.days} onChange={(v) => onChange({ min_top: v })} />
         </div>
       </div>
 
-      {/* Group 1.5: 模型组合 (immediate update; triggers backend refetch) */}
-      {availableModels.length > 0 && (
-        <ModelSelector
-          available={availableModels}
-          selected={params.models}
-          active={activeModels}
-          onChange={(models) => onChange({ models })}
-        />
-      )}
+      {/* Group 1.5: 模型 / 视图 — 需重新计算 */}
+      <div className="rounded-md border border-[#30363d] bg-[#161b22] p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[10px] text-[#6e7681] uppercase tracking-wider">模型 / 视图 · 需重新计算</h3>
+          <button
+            onClick={onRecompute}
+            disabled={!recomputeDirty || recomputeBusy}
+            className={cn(
+              'text-xs px-3 py-1 rounded border',
+              recomputeDirty && !recomputeBusy
+                ? 'bg-[#1f6feb] border-[#1f6feb] text-white hover:bg-[#388bfd]'
+                : 'bg-[#21262d] border-[#30363d] text-[#6e7681] cursor-not-allowed',
+            )}
+          >
+            {recomputeBusy ? '计算中…' : recomputeDirty ? '重新计算 ●' : '重新计算'}
+          </button>
+        </div>
+        <Select label="视图" value={draftView} options={VIEW_OPTIONS} onChange={(v) => onDraftView(v as View)} />
+        {availableModels.length > 0 && (
+          <ModelSelector available={availableModels} selected={draftModels} active={activeModels} onChange={onDraftModels} />
+        )}
+      </div>
 
       {/* Group 2: 价格 (debounced) */}
       <div>

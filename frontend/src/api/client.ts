@@ -1,4 +1,4 @@
-import type { paths } from '@/api/types.gen';
+import type { components, paths } from '@/api/types.gen';
 import type { AiAnalysis, AnalysisJob, AnalysisStatus } from '@/analysis/types';
 
 const BASE = ''; // empty in production (same origin); Vite proxy handles /api in dev
@@ -25,6 +25,24 @@ export interface StartTrainingResponse {
   status: 'started' | 'rejected';
   job_id?: string;
   reason?: string;
+}
+
+export interface TrainingRunRow {
+  job_id: string | null;
+  kind: string | null;
+  scope: string | null;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'historical';
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+  recorder_id: string | null;
+  run_name: string | null;
+  error: string | null;
+  ic_mean: number | null;
+  ir: number | null;
+  acceptance_passed: boolean | null;
+  experiment: string | null;
+  is_candidate: boolean;
 }
 
 export class ApiError extends Error {
@@ -245,6 +263,21 @@ export const api = {
       const qs = q.toString();
       return request<R>(`/api/models/candidates${qs ? '?' + qs : ''}`);
     },
+    recompute: (body: { view: string; models: string[] }) => {
+      type R = components['schemas']['RecomputeTriggerResponse'];
+      return request<R>('/api/models/candidates/recompute', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    },
+    recomputeStatus: (jobId: string) => {
+      type R = components['schemas']['RecomputeJob'];
+      return request<R>(`/api/models/candidates/recompute/${encodeURIComponent(jobId)}`);
+    },
+    recomputeActive: () => {
+      type R = components['schemas']['RecomputeJob'];
+      return request<R | null>('/api/models/candidates/recompute/active');
+    },
     predictions: (
       symbol: string,
       params: {
@@ -369,13 +402,19 @@ export const api = {
     },
   },
   training: {
-    run: (force = false) =>
+    run: (body: { scope: 'full' | 'single'; models?: string[]; force?: boolean }) =>
       request<StartTrainingResponse>('/api/training/run', {
         method: 'POST',
-        body: JSON.stringify({ scope: 'full', force }),
+        body: JSON.stringify({ scope: body.scope, models: body.models ?? [], force: body.force ?? false }),
       }),
+    promote: (recorder_id: string, candidate_experiment: string) =>
+      request<{ status: string; new_recorder_name?: string; production_experiment?: string; from_recorder_id?: string }>(
+        '/api/training/promote',
+        { method: 'POST', body: JSON.stringify({ recorder_id, candidate_experiment }) },
+      ),
     active: () => request<TrainingJobStatus | null>('/api/training/jobs/active'),
     status: (jobId: string) =>
       request<TrainingJobStatus | null>(`/api/training/jobs/${encodeURIComponent(jobId)}`),
+    runs: () => request<TrainingRunRow[]>('/api/training/runs'),
   },
 };

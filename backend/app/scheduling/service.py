@@ -66,15 +66,16 @@ def make_subprocess_retrain_job(python_path: str, repo_root: Path) -> JobCallabl
     the training layer for structured PROGRESS lines.
     """
 
-    async def _job(job_id: str, log_path: Path, profile_name: str = "conservative") -> None:
+    async def _job(job_id: str, log_path: Path, run_spec: list[str] | None = None, profile_name: str = "conservative") -> None:
+        argv = run_spec if run_spec else ["run-once"]
         log_path.parent.mkdir(parents=True, exist_ok=True)
         prof = PROFILES.get(profile_name, PROFILES["conservative"])
-        _log.info("retrain_subprocess_starting", job_id=job_id, python=python_path, cwd=str(repo_root), profile=profile_name)
+        _log.info("retrain_subprocess_starting", job_id=job_id, argv=argv, python=python_path, cwd=str(repo_root), profile=profile_name)
         proc = await asyncio.create_subprocess_exec(
             python_path,
             "-m",
             "production.rolling_train",
-            "run-once",
+            *argv,
             cwd=str(repo_root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -239,7 +240,9 @@ class SchedulerManager:
         _log.info("schedule_updated", schedule=schedule.model_dump())
         return schedule
 
-    async def run_now(self, session: AsyncSession, force: bool = False) -> str:
+    async def run_now(
+        self, session: AsyncSession, force: bool = False, run_spec: list[str] | None = None
+    ) -> str:
         now = datetime.now(tz=_CST)
         if not force and is_trading_hours_cst(now):
             raise TradingHoursViolation(
@@ -264,6 +267,7 @@ class SchedulerManager:
                 "queued_at": datetime.now(tz=_CST).isoformat(),
                 "error": None,
                 "log_path": str(self._log_path_for(job_id)),
+                "run_spec": run_spec,
             })
             self._active_job_id = job_id
             job = self._scheduler.add_job(
@@ -322,16 +326,24 @@ class SchedulerManager:
                 if entry is not None:
                     entry["status"] = "running"
                     entry["started_at"] = datetime.now(tz=_CST).isoformat()
+                await self._persist_run(job_id=_tracked_job_id, phase="start", entry=entry)
                 try:
                     kind = (entry or {}).get("kind", "manual")
                     profile_name = "aggressive" if kind == "cron" else "conservative"
-                    await self._raw_job_fn(_tracked_job_id, self._log_path_for(_tracked_job_id), profile_name)
+                    await self._raw_job_fn(
+                        _tracked_job_id,
+                        self._log_path_for(_tracked_job_id),
+                        (entry or {}).get("run_spec"),
+                        profile_name,
+                    )
                     if entry is not None:
                         entry["status"] = "done"
+                    await self._persist_run(job_id=_tracked_job_id, phase="done", entry=entry)
                 except Exception as exc:
                     if entry is not None:
                         entry["status"] = "failed"
                         entry["error"] = str(exc)
+                    await self._persist_run(job_id=_tracked_job_id, phase="failed", entry=entry)
                     _log.exception("retrain_subprocess_raised", job_id=_tracked_job_id)
                     raise
                 finally:
@@ -365,6 +377,40 @@ class SchedulerManager:
             return
         _log.info("nightly_inference_trigger")
         inf.trigger_inference(reason="nightly_scheduled", profile_name="aggressive")
+
+    async def _persist_run(self, *, job_id: str, phase: str, entry: dict | None) -> None:
+        """Best-effort write to training_runs. Never raises (DB optional)."""
+        from app.core import db as _db
+        if _db._session_maker is None:
+            return
+        try:
+            from datetime import datetime as _dt
+            now = _dt.now(tz=_CST).isoformat()
+            async with _db._session_maker() as session:
+                if phase == "start":
+                    from app.training import store
+                    rs = (entry or {}).get("run_spec")
+                    if rs and "reblend" in rs and "--only" in rs:
+                        scope, models = "single", [rs[rs.index("--only") + 1]]
+                    else:
+                        scope, models = "full", None
+                    await store.record_run_start(
+                        session, job_id=job_id,
+                        kind=(entry or {}).get("kind", "manual"),
+                        scope=scope, models=models, started_at=now,
+                    )
+                else:
+                    from app.training import store
+                    from app.training.service import latest_recorder_id
+                    log_path = (entry or {}).get("log_path")
+                    rid = latest_recorder_id(Path(log_path)) if log_path else None
+                    await store.record_run_finish(
+                        session, job_id=job_id, status=phase,
+                        recorder_id=rid, error=(entry or {}).get("error"),
+                        finished_at=now,
+                    )
+        except Exception:
+            _log.warning("persist_training_run_failed", job_id=job_id, phase=phase, exc_info=True)
 
     def _install_job(self, schedule: RetrainScheduleRead) -> None:
         trigger = CronTrigger(

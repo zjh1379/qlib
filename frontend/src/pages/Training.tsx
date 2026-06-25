@@ -1,4 +1,8 @@
-import { useActiveTrainingJob, useStartTraining } from '@/training/hooks';
+import { useState } from 'react';
+import { useActiveTrainingJob, useStartTraining, useTrainingRuns, useRollback, usePromote } from '@/training/hooks';
+import { toast } from '@/jobs/toast';
+import { useCompare } from '@/pages/evaluation/hooks';
+import { CompareCard } from '@/pages/evaluation/CompareCard';
 
 const PHASE_LABEL: Record<string, string> = {
   universe: '构建股票池',
@@ -6,6 +10,11 @@ const PHASE_LABEL: Record<string, string> = {
   ensemble: '融合',
   done: '完成',
 };
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: '排队', running: '训练中', done: '完成', failed: '失败', skipped: '跳过', historical: '历史',
+};
+function fmt(x: number | null, d = 3) { return x == null ? '—' : x.toFixed(d); }
 
 function PhaseBadge({ phase }: { phase: string }) {
   return (
@@ -19,6 +28,16 @@ export default function Training() {
   const start = useStartTraining();
   const { data: job } = useActiveTrainingJob();
   const running = job?.status === 'running' || job?.status === 'pending';
+  const runs = useTrainingRuns();
+  const rollback = useRollback();
+  const promote = usePromote();
+  const [scope, setScope] = useState<'full' | 'single'>('full');
+  const [singleModel, setSingleModel] = useState<'lgbm' | 'alstm' | 'tra'>('lgbm');
+  const [selected, setSelected] = useState<string[]>([]);
+  const toggle = (rid: string) =>
+    setSelected((prev) =>
+      prev.includes(rid) ? prev.filter((x) => x !== rid) : prev.length >= 2 ? [prev[1], rid] : [...prev, rid],
+    );
 
   return (
     <div className="p-4 space-y-6 text-[#e6edf3]">
@@ -27,12 +46,35 @@ export default function Training() {
       {/* 训练 section */}
       <section className="rounded-lg border border-[#30363d] p-4 space-y-3">
         <h2 className="text-sm font-medium text-[#8b949e]">训练</h2>
+        <div className="flex items-center gap-3 text-xs">
+          <label className="flex items-center gap-1">
+            <input type="radio" name="scope" checked={scope === 'full'} onChange={() => setScope('full')} /> 全量集成
+          </label>
+          <label className="flex items-center gap-1">
+            <input type="radio" name="scope" checked={scope === 'single'} onChange={() => setScope('single')} /> 单算法
+          </label>
+          {scope === 'single' && (
+            <select
+              className="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-xs"
+              value={singleModel}
+              onChange={(e) => setSingleModel(e.target.value as 'lgbm' | 'alstm' | 'tra')}
+            >
+              <option value="lgbm">LGBM</option>
+              <option value="alstm">ALSTM</option>
+              <option value="tra">TRA</option>
+            </select>
+          )}
+        </div>
         <button
           className="px-3 py-1.5 rounded bg-[#1f6feb] text-white text-sm disabled:opacity-50"
           disabled={running || start.isPending}
-          onClick={() => start.mutate(false)}
+          onClick={() =>
+            start.mutate(scope === 'single'
+              ? { scope: 'single', models: [singleModel], force: false }
+              : { scope: 'full', force: false })
+          }
         >
-          {running ? '训练进行中…' : '立即训练(全量)'}
+          {running ? '训练进行中…' : scope === 'single' ? `训练 ${singleModel.toUpperCase()}` : '立即训练(全量)'}
         </button>
         {start.data?.status === 'rejected' && (
           <p className="text-xs text-amber-400">已拒绝:{start.data.reason}</p>
@@ -91,6 +133,107 @@ export default function Training() {
           </div>
         )}
       </section>
+
+      {/* ③ 历史模型 */}
+      <section className="rounded-lg border border-[#30363d] p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium text-[#8b949e]">历史模型</h2>
+          <button
+            className="px-2 py-1 rounded text-xs bg-red-700 text-white hover:bg-red-600 disabled:opacity-50"
+            disabled={rollback.isPending}
+            onClick={() => {
+              if (confirm('回滚到上一版模型？当前 recorder 会被归档。')) {
+                rollback.mutate('previous_1', {
+                  onSuccess: (r) => toast.success(`已回滚:${r.status}`),
+                  onError: (e) => toast.error(`回滚失败:${String((e as Error)?.message ?? e)}`),
+                });
+              }
+            }}
+          >
+            {rollback.isPending ? '回滚中…' : '回滚上一版'}
+          </button>
+        </div>
+        {runs.isLoading && <p className="text-xs text-[#8b949e]">加载中…</p>}
+        {runs.data && runs.data.length === 0 && <p className="text-xs text-[#8b949e]">暂无历史。</p>}
+        {runs.data && runs.data.length > 0 && (
+          <div className="rounded-lg border border-[#30363d] overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-[#161b22] text-[#8b949e] text-xs">
+                <tr>
+                  <th className="p-2 text-left w-8"></th>
+                  <th className="p-2 text-left">时间</th>
+                  <th className="p-2 text-left">范围</th>
+                  <th className="p-2 text-left">状态</th>
+                  <th className="p-2 text-right">IC</th>
+                  <th className="p-2 text-right">IR</th>
+                  <th className="p-2 text-center">验收</th>
+                  <th className="p-2 text-center">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.data.map((row) => {
+                  const key = row.recorder_id ?? row.job_id ?? Math.random().toString();
+                  const selectable = !!row.recorder_id;
+                  return (
+                    <tr key={key} className="border-t border-[#21262d] hover:bg-[#161b22]">
+                      <td className="p-2">
+                        <input
+                          type="checkbox"
+                          disabled={!selectable}
+                          checked={!!row.recorder_id && selected.includes(row.recorder_id)}
+                          onChange={() => row.recorder_id && toggle(row.recorder_id)}
+                        />
+                      </td>
+                      <td className="p-2 text-[#8b949e]">{(row.created_at ?? '').slice(0, 16).replace('T', ' ')}</td>
+                      <td className="p-2">{row.scope === 'full' ? '全量' : row.scope ?? '—'}</td>
+                      <td className="p-2">{STATUS_LABEL[row.status] ?? row.status}{row.status === 'failed' && row.error ? ` · ${row.error.slice(0, 40)}` : ''}</td>
+                      <td className="p-2 text-right font-mono">{fmt(row.ic_mean)}</td>
+                      <td className="p-2 text-right font-mono">{fmt(row.ir, 2)}</td>
+                      <td className="p-2 text-center">{row.acceptance_passed == null ? '—' : row.acceptance_passed ? '✓' : '✗'}</td>
+                      <td className="p-2 text-center">
+                        {row.is_candidate && row.recorder_id && row.experiment ? (
+                          <button
+                            className="px-2 py-0.5 rounded text-xs bg-[#238636] text-white hover:bg-[#2ea043] disabled:opacity-50"
+                            disabled={promote.isPending}
+                            onClick={() => {
+                              if (confirm(`将候选 ${row.run_name ?? row.recorder_id} 设为当前生产模型？`)) {
+                                promote.mutate(
+                                  { recorder_id: row.recorder_id as string, candidate_experiment: row.experiment as string },
+                                  {
+                                    onSuccess: (r) => toast.success(`已上线:${r.new_recorder_name ?? r.status}`),
+                                    onError: (e) => toast.error(`上线失败:${String((e as Error)?.message ?? e)}`),
+                                  },
+                                );
+                              }
+                            }}
+                          >
+                            {promote.isPending ? '上线中…' : '设为当前'}
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* ④ 对比 */}
+      {selected.length === 2 && <CompareSection a={selected[0]} b={selected[1]} />}
     </div>
+  );
+}
+
+function CompareSection({ a, b }: { a: string; b: string }) {
+  const cmp = useCompare(a, b);
+  return (
+    <section className="rounded-lg border border-[#30363d] p-4 space-y-3">
+      <h2 className="text-sm font-medium text-[#8b949e]">对比(已选 2 个)</h2>
+      {cmp.isPending && <p className="text-xs text-[#8b949e]">评估/对比计算中…(首次较慢)</p>}
+      {cmp.isError && <p className="text-xs text-red-400">对比失败:{String((cmp.error as Error)?.message ?? cmp.error)}</p>}
+      {cmp.data && <CompareCard data={cmp.data} />}
+    </section>
   );
 }

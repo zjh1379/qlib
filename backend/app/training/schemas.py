@@ -9,8 +9,8 @@ class TrainingProgress(BaseModel):
 
 
 class TrainRequest(BaseModel):
-    # P1: full ensemble only. `scope`/`models` reserved for P3 (single-algo).
-    scope: str = Field("full", description='"full" (P1). Single-algo arrives in P3.')
+    scope: str = Field("full", description='"full" | "single"')
+    models: list[str] = Field(default_factory=list, description='for scope="single": exactly one model id')
     force: bool = Field(False, description="Override the trading-hours guard.")
 
 
@@ -23,3 +23,26 @@ class TrainingJobStatus(BaseModel):
     error: str | None = None
     progress: TrainingProgress | None = None
     log_tail: str | None = None
+
+
+class PromoteRequest(BaseModel):
+    recorder_id: str
+    candidate_experiment: str
+
+
+class TrainingRunRow(BaseModel):
+    job_id: str | None = None
+    kind: str | None = None
+    scope: str | None = None
+    status: str                       # pending|running|done|failed|skipped|historical
+    started_at: str | None = None
+    finished_at: str | None = None
+    created_at: str | None = None
+    recorder_id: str | None = None
+    run_name: str | None = None
+    error: str | None = None
+    ic_mean: float | None = None
+    ir: float | None = None
+    acceptance_passed: bool | None = None
+    experiment: str | None = None
+    is_candidate: bool = False

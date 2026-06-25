@@ -54,7 +54,7 @@ import yaml
 from production.consensus import consensus_per_row, write_pred_pkl
 from production.pit_constituents import load_or_refresh, members_on
 from production.post_process import ewma_smooth
-from production.progress import emit_progress
+from production.progress import emit_progress, emit_recorder
 from production.walk_forward import HorizonConfig, split
 
 _log = logging.getLogger("rolling_train")
@@ -122,6 +122,57 @@ class RollingConfig:
     # universe — lets the trained model also produce predictions for these
     # symbols even though they're not in the csi300+csi500 base.
     universe_extras: list[str] | None = None
+
+
+def _stack_score(base_preds: pd.DataFrame, oof_labels: pd.Series, *, ewma_alpha: float = 0.5) -> pd.DataFrame:
+    """Fit the Ridge stacker on OOF (base_preds rows overlapping oof_labels dates)
+    and score the full base_preds. Pure: no qlib/IO. Mirrors run_once's ensemble math."""
+    from production.ensemble_stacker import RidgeStacker
+    from production.ensemble_rank_avg import rank_average
+    try:
+        valid_mask = base_preds.index.get_level_values("datetime").isin(
+            oof_labels.index.get_level_values("datetime").unique()
+        )
+        valid_base = base_preds[valid_mask]
+        stacker = RidgeStacker().fit_oof(valid_base, oof_labels)
+        unified = stacker.predict_with_fallback(base_preds).rename("score")
+    except Exception as exc:
+        _log.warning("stacker_failed_using_rank_average error=%s", str(exc))
+        unified = (-rank_average(base_preds)).rename("score")
+    out = base_preds.copy()
+    out["score"] = unified
+    out["consensus"] = consensus_per_row(base_preds)
+    out = ewma_smooth(out, alpha=ewma_alpha, score_col="score")
+    return out
+
+
+def pool_stack_write(
+    cfg: "RollingConfig", series_list: list[pd.Series], end_date: date, members: list[str],
+    *, experiment_name: str, recorder_name: str, seed_serving: bool,
+) -> Path:
+    """Concat base series, refit stacker on the 5d valid window, write pred.pkl,
+    and persist a recorder under experiment_name. Used by reblend_single (candidate exp)."""
+    from qlib.data import D
+    from qlib.workflow import R
+    base_preds = pd.concat(series_list, axis=1).dropna(how="all")
+    h5 = next(h for h in cfg.horizons if h.name == "5d")
+    s_5 = split(end_date=end_date, cfg=h5)
+    labels = D.features(instruments=members, fields=["Ref($open, -6) / Ref($open, -1) - 1"],
+                        start_time=str(s_5.valid_start), end_time=str(s_5.valid_end))
+    labels.columns = ["y"]
+    labels.index.names = ["instrument", "datetime"]
+    labels = labels.swaplevel("instrument", "datetime").sort_index()["y"]
+    out = _stack_score(base_preds, labels, ewma_alpha=cfg.ewma_alpha)
+    pred_path = REPO_ROOT / "examples" / "mlruns" / f"pred_{recorder_name}.pkl"
+    write_pred_pkl(out, pred_path)
+    with R.start(experiment_name=experiment_name, recorder_name=recorder_name):
+        try:
+            emit_recorder(R.get_recorder().id)
+        except Exception:
+            pass
+        if seed_serving:
+            R.save_objects(**{"pred.pkl": out})
+    return pred_path
 
 
 def load_config(path: Path) -> RollingConfig:
@@ -549,6 +600,10 @@ def run_once(
         from qlib.workflow import R
         from production.train_helpers import is_live_fold
         with R.start(experiment_name=cfg.experiment_name, recorder_name=f"ensemble_{end_date}"):
+            try:
+                emit_recorder(R.get_recorder().id)
+            except Exception:
+                pass
             if is_live_fold(end_date):
                 R.save_objects(**{"pred.pkl": out})
                 _log.info("seeded_serving_pred recorder=ensemble_%s rows=%d", end_date, len(out))
@@ -769,6 +824,11 @@ def main() -> None:
         help="LGBM objective: 'mse' (default) or 'lambdarank' (learning-to-rank).",
     )
 
+    p_reblend = sub.add_parser("reblend", help="Retrain ONE model on the latest fold + re-blend into a candidate.")
+    p_reblend.add_argument("--only", required=True, help="model id: lgbm | alstm | tra")
+    p_reblend.add_argument("--end-date", default=None, help="fold end date; default = latest ensemble recorder's date")
+    p_reblend.add_argument("--config", default="production/configs/rolling_ensemble.yaml")
+
     args = parser.parse_args()
 
     if args.cmd == "run-once":
@@ -808,6 +868,12 @@ def main() -> None:
         print(f"OK: backfilled {len(paths)} folds")
         for p in paths:
             print(f"  {p}")
+    elif args.cmd == "reblend":
+        cfg = load_config(REPO_ROOT / args.config)
+        from production.reblend import reblend_single, latest_full_fold_end_date
+        end = date.fromisoformat(args.end_date) if args.end_date else latest_full_fold_end_date(cfg)
+        name = reblend_single(cfg, args.only, end)
+        print(f"OK: wrote candidate {name}")
     else:
         raise NotImplementedError(args.cmd)
 
