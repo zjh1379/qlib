@@ -357,7 +357,10 @@ def run(end_date: date | None = None, force: bool = False,
         log.error("no_predictions_produced")
         return 1
 
-    raw_df = pd.concat(list(raw_scores.values()), axis=1).sort_index()
+    # concat the DICT (not its values) so columns are the intended "{mid}_{h}" keys;
+    # using list(values) labels columns by each Series' .name (which may be an int /
+    # "score" / None), breaking _composite_and_calibrate's c.endswith("_{h}") matching.
+    raw_df = pd.concat(raw_scores, axis=1).sort_index()
     raw_df = raw_df[~raw_df.index.duplicated(keep="last")]
     raw_df.index.names = ["datetime", "instrument"]
 
