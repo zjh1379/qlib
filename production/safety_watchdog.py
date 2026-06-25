@@ -182,6 +182,10 @@ def main() -> int:
     parser.add_argument("--interval", type=float, default=2.0,
                         help="poll interval seconds (default 2.0)")
     parser.add_argument("--log-level", default="INFO")
+    parser.add_argument("--floor-gb", type=float, default=4.0,
+                        help="kill heaviest training proc if free commit < this many GB (default 4)")
+    parser.add_argument("--kills-path", default=None,
+                        help="append JSON kill records here (e.g. logs/watchdog_kills.jsonl)")
     args = parser.parse_args()
 
     _setup_logging(args.log_level)
